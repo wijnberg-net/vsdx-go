@@ -86,3 +86,38 @@ func (dp *DataProperty) SetValue(value string) {
 		valueCell.SetText(value)
 	}
 }
+
+// GetAttribute returns the attribute value of a named child Cell element.
+func (dp *DataProperty) GetAttribute(cellName, attrName string) string {
+	elem := dp.xml.FindElement("Cell[@N='" + cellName + "']")
+	if elem == nil {
+		return ""
+	}
+	return elem.SelectAttrValue(attrName, "")
+}
+
+// SetAttribute sets the attribute value of a named child Cell element.
+// Returns true if the element was found and the attribute was set.
+func (dp *DataProperty) SetAttribute(cellName, attrName, value string) bool {
+	elem := dp.xml.FindElement("Cell[@N='" + cellName + "']")
+	if elem == nil {
+		return false
+	}
+	elem.CreateAttr(attrName, value)
+	return true
+}
+
+// RemoveAttribute removes an attribute from a named child Cell element.
+// Returns true if the attribute was found and removed.
+func (dp *DataProperty) RemoveAttribute(cellName, attrName string) bool {
+	elem := dp.xml.FindElement("Cell[@N='" + cellName + "']")
+	if elem == nil {
+		return false
+	}
+	attr := elem.SelectAttr(attrName)
+	if attr == nil {
+		return false
+	}
+	elem.RemoveAttr(attrName)
+	return true
+}

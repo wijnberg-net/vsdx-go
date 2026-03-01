@@ -2,6 +2,7 @@ package vsdx
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/beevik/etree"
 )
@@ -329,4 +330,71 @@ func (p *Page) GetConnectorsBetween(shapeAID, shapeAText, shapeBID, shapeBText s
 		}
 	}
 	return connectors, nil
+}
+
+// --- Page editing methods ---
+
+// SetName sets the page name (updates Name and NameU attributes in pages.xml).
+func (p *Page) SetName(name string) {
+	p.name = name
+	if p.vis.pagesXML != nil {
+		for _, pageElem := range p.vis.pagesXML.Root().SelectElements("Page") {
+			if pageElem.SelectAttrValue("ID", "") == p.pageID {
+				pageElem.CreateAttr("Name", name)
+				pageElem.CreateAttr("NameU", name)
+				break
+			}
+		}
+	}
+}
+
+// SetWidth sets the page width in the PageSheet.
+func (p *Page) SetWidth(width float64) {
+	ps := p.pagesheetXML()
+	if ps == nil {
+		return
+	}
+	cell := ps.FindElement("Cell[@N='PageWidth']")
+	if cell != nil {
+		cell.CreateAttr("V", strconv.FormatFloat(width, 'f', -1, 64))
+	}
+}
+
+// SetHeight sets the page height in the PageSheet.
+func (p *Page) SetHeight(height float64) {
+	ps := p.pagesheetXML()
+	if ps == nil {
+		return
+	}
+	cell := ps.FindElement("Cell[@N='PageHeight']")
+	if cell != nil {
+		cell.CreateAttr("V", strconv.FormatFloat(height, 'f', -1, 64))
+	}
+}
+
+// AddConnect adds a Connect element to this page's XML.
+func (p *Page) AddConnect(connect *Connect) {
+	if p.xml == nil || p.xml.Root() == nil {
+		return
+	}
+	// Find or create Connects element
+	connectsElem := p.xml.Root().SelectElement("Connects")
+	if connectsElem == nil {
+		connectsElem = p.xml.Root().CreateElement("Connects")
+	}
+	connectsElem.AddChild(connect.xml)
+}
+
+// FindReplace finds and replaces text across all shapes on this page.
+func (p *Page) FindReplace(old, new string) {
+	for _, s := range p.shapes() {
+		s.FindReplace(old, new)
+	}
+}
+
+// ApplyTextContext applies text context/filter to all shapes on this page.
+func (p *Page) ApplyTextContext(context map[string]string) {
+	for _, s := range p.shapes() {
+		s.ApplyTextFilter(context)
+	}
 }

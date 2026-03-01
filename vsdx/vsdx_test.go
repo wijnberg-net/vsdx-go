@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1238,6 +1239,555 @@ func TestConnectString(t *testing.T) {
 	// Should contain "Connect:" prefix
 	if !strings.Contains(str, "Connect:") {
 		t.Errorf("String() = %q, want to contain 'Connect:'", str)
+	}
+}
+
+// --- Fase 3: Editing ---
+
+func TestSetCellValue(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	// Set existing cell value
+	origX := shape.X()
+	shape.SetCellValue("PinX", "5.0")
+	if shape.CellValue("PinX") != "5.0" {
+		t.Errorf("PinX = %q, want '5.0'", shape.CellValue("PinX"))
+	}
+	if shape.X() != 5.0 {
+		t.Errorf("X() = %v, want 5.0", shape.X())
+	}
+
+	// Set new cell value (doesn't exist yet)
+	shape.SetCellValue("TestCell", "42")
+	if shape.CellValue("TestCell") != "42" {
+		t.Errorf("TestCell = %q, want '42'", shape.CellValue("TestCell"))
+	}
+
+	// Restore original
+	shape.SetCellValue("PinX", strconv.FormatFloat(origX, 'f', -1, 64))
+}
+
+func TestSetCellFormula(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	// Set formula on new cell
+	shape.SetCellFormula("NewCell", "Width*0.5")
+	if shape.CellFormula("NewCell") != "Width*0.5" {
+		t.Errorf("NewCell formula = %q, want 'Width*0.5'", shape.CellFormula("NewCell"))
+	}
+}
+
+func TestSetPositionAndSize(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.SetX(3.0)
+	shape.SetY(4.0)
+	shape.SetWidth(2.0)
+	shape.SetHeight(1.5)
+	shape.SetAngle(0.5)
+
+	if shape.X() != 3.0 {
+		t.Errorf("X() = %v, want 3.0", shape.X())
+	}
+	if shape.Y() != 4.0 {
+		t.Errorf("Y() = %v, want 4.0", shape.Y())
+	}
+	if shape.Width() != 2.0 {
+		t.Errorf("Width() = %v, want 2.0", shape.Width())
+	}
+	if shape.Height() != 1.5 {
+		t.Errorf("Height() = %v, want 1.5", shape.Height())
+	}
+	if shape.Angle() != 0.5 {
+		t.Errorf("Angle() = %v, want 0.5", shape.Angle())
+	}
+}
+
+func TestSetStyleProperties(t *testing.T) {
+	vis, err := Open(testFile("test12_colors.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.Pages[0].FindShapeByText("Line Color")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.SetLineColor("#00ff00")
+	if shape.LineColor() != "#00ff00" {
+		t.Errorf("LineColor = %q, want '#00ff00'", shape.LineColor())
+	}
+
+	shape.SetFillColor("#0000ff")
+	if shape.FillColor() != "#0000ff" {
+		t.Errorf("FillColor = %q, want '#0000ff'", shape.FillColor())
+	}
+
+	shape.SetLineWeight(0.5)
+	if shape.LineWeight() != 0.5 {
+		t.Errorf("LineWeight = %v, want 0.5", shape.LineWeight())
+	}
+}
+
+func TestSetTextColor(t *testing.T) {
+	vis, err := Open(testFile("test12_colors.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.Pages[0].FindShapeByText("Text Color")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.SetTextColor("#0000ff")
+	if shape.TextColor() != "#0000ff" {
+		t.Errorf("TextColor = %q, want '#0000ff'", shape.TextColor())
+	}
+}
+
+func TestSetEndArrow(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.SetEndArrow(13)
+	if shape.EndArrow() != "13" {
+		t.Errorf("EndArrow = %q, want '13'", shape.EndArrow())
+	}
+
+	shape.SetEndArrow(0)
+	if shape.EndArrow() != "0" {
+		t.Errorf("EndArrow = %q, want '0'", shape.EndArrow())
+	}
+}
+
+func TestSetStyleIDs(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.SetLineStyleID("5")
+	shape.SetFillStyleID("6")
+	shape.SetTextStyleID("7")
+
+	if shape.LineStyleID() != "5" {
+		t.Errorf("LineStyleID = %q, want '5'", shape.LineStyleID())
+	}
+	if shape.FillStyleID() != "6" {
+		t.Errorf("FillStyleID = %q, want '6'", shape.FillStyleID())
+	}
+	if shape.TextStyleID() != "7" {
+		t.Errorf("TextStyleID = %q, want '7'", shape.TextStyleID())
+	}
+}
+
+func TestSetText(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.SetText("New Text")
+	if shape.Text() != "New Text" {
+		t.Errorf("Text() = %q, want 'New Text'", shape.Text())
+	}
+}
+
+func TestMoveShape(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	origX := shape.X()
+	origY := shape.Y()
+	shape.Move(1.0, 2.0)
+
+	if math.Abs(shape.X()-(origX+1.0)) > 0.001 {
+		t.Errorf("X() = %v, want %v", shape.X(), origX+1.0)
+	}
+	if math.Abs(shape.Y()-(origY+2.0)) > 0.001 {
+		t.Errorf("Y() = %v, want %v", shape.Y(), origY+2.0)
+	}
+}
+
+func TestRemoveShape(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	origCount := len(page.ChildShapes())
+
+	shape := page.FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+	shape.Remove()
+
+	newCount := len(page.ChildShapes())
+	if newCount != origCount-1 {
+		t.Errorf("child shapes = %d, want %d", newCount, origCount-1)
+	}
+
+	// Verify shape is no longer findable
+	if page.FindShapeByText("Shape Text") != nil {
+		t.Error("removed shape still found")
+	}
+}
+
+func TestFindReplace(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	shape.FindReplace("Shape", "New")
+	if !strings.Contains(shape.Text(), "New") {
+		t.Errorf("Text() = %q, want to contain 'New'", shape.Text())
+	}
+}
+
+func TestApplyTextFilter(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("{{date}}")
+	if shape == nil {
+		t.Fatal("shape with {{date}} not found")
+	}
+
+	shape.ApplyTextFilter(map[string]string{"date": "2024-01-01"})
+	if strings.Contains(shape.Text(), "{{date}}") {
+		t.Errorf("Text still contains {{date}}: %q", shape.Text())
+	}
+	if !strings.Contains(shape.Text(), "2024-01-01") {
+		t.Errorf("Text doesn't contain replacement: %q", shape.Text())
+	}
+}
+
+func TestRelativeBounds(t *testing.T) {
+	vis, err := Open(testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	shape := page.FindShapeByText("Sub-shape 2")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	rbx, rby, rex, rey := shape.RelativeBounds()
+	// RelativeBounds should return non-zero values
+	if rbx == 0 && rby == 0 && rex == 0 && rey == 0 {
+		t.Error("RelativeBounds returned all zeros")
+	}
+	// RelativeBounds should be different from Bounds for sub-shapes
+	bx, by, ex, ey := shape.Bounds()
+	t.Logf("Bounds: (%.2f, %.2f, %.2f, %.2f)", bx, by, ex, ey)
+	t.Logf("RelativeBounds: (%.2f, %.2f, %.2f, %.2f)", rbx, rby, rex, rey)
+}
+
+// --- Page editing tests ---
+
+func TestSetPageName(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	page.SetName("NewPageName")
+	if page.Name() != "NewPageName" {
+		t.Errorf("page name = %q, want 'NewPageName'", page.Name())
+	}
+}
+
+func TestSetPageSize(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	page.SetWidth(10.0)
+	page.SetHeight(12.0)
+	if page.Width() != 10.0 {
+		t.Errorf("width = %v, want 10.0", page.Width())
+	}
+	if page.Height() != 12.0 {
+		t.Errorf("height = %v, want 12.0", page.Height())
+	}
+}
+
+func TestPageFindReplace(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	page.FindReplace("Shape Text", "Replaced Text")
+
+	shape := page.FindShapeByText("Replaced Text")
+	if shape == nil {
+		t.Error("replaced text not found in any shape")
+	}
+}
+
+func TestPageApplyTextContext(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	page.ApplyTextContext(map[string]string{"date": "2024-06-15"})
+
+	// Verify {{date}} was replaced
+	shape := page.FindShapeByText("2024-06-15")
+	if shape == nil {
+		t.Error("text context not applied - replacement text not found")
+	}
+	if page.FindShapeByText("{{date}}") != nil {
+		t.Error("{{date}} still found after applying context")
+	}
+}
+
+// --- Geometry editing tests ---
+
+func TestGeometryMove(t *testing.T) {
+	// test5_master.vsdx shape 5 has absolute MoveTo/LineTo rows
+	vis, err := Open(testFile("test5_master.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByID("5")
+	if shape == nil || shape.Geometry == nil {
+		t.Fatal("shape or geometry not found")
+	}
+
+	// Get original MoveTo position
+	var origX, origY float64
+	for _, row := range shape.Geometry.Rows {
+		if strings.ToLower(row.RowType()) == "moveto" {
+			origX = row.X()
+			origY = row.Y()
+			break
+		}
+	}
+
+	shape.Geometry.Move(1.0, 2.0)
+
+	for _, row := range shape.Geometry.Rows {
+		if strings.ToLower(row.RowType()) == "moveto" {
+			if math.Abs(row.X()-(origX+1.0)) > 0.001 {
+				t.Errorf("MoveTo X after move = %v, want %v", row.X(), origX+1.0)
+			}
+			if math.Abs(row.Y()-(origY+2.0)) > 0.001 {
+				t.Errorf("MoveTo Y after move = %v, want %v", row.Y(), origY+2.0)
+			}
+			break
+		}
+	}
+}
+
+func TestGeometryRowSetters(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil || shape.Geometry == nil {
+		t.Fatal("shape or geometry not found")
+	}
+
+	for _, row := range shape.Geometry.Rows {
+		row.SetX(5.0)
+		row.SetY(6.0)
+		if row.X() != 5.0 {
+			t.Errorf("X = %v, want 5.0", row.X())
+		}
+		if row.Y() != 6.0 {
+			t.Errorf("Y = %v, want 6.0", row.Y())
+		}
+		break // test first row only
+	}
+}
+
+// --- DataProperty editing tests ---
+
+func TestDataPropertySetAttribute(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+
+	props := shape.DataProperties()
+	prop, ok := props["my_property_label"]
+	if !ok {
+		t.Fatal("property 'my_property_label' not found")
+	}
+
+	// Get attribute
+	origVal := prop.GetAttribute("Value", "V")
+	if origVal != "property value" {
+		t.Errorf("GetAttribute = %q, want 'property value'", origVal)
+	}
+
+	// Set attribute
+	if !prop.SetAttribute("Value", "V", "new value") {
+		t.Error("SetAttribute returned false")
+	}
+	if prop.GetAttribute("Value", "V") != "new value" {
+		t.Errorf("after set, GetAttribute = %q, want 'new value'", prop.GetAttribute("Value", "V"))
+	}
+
+	// Remove attribute
+	if !prop.RemoveAttribute("Value", "V") {
+		t.Error("RemoveAttribute returned false")
+	}
+	if prop.GetAttribute("Value", "V") != "" {
+		t.Errorf("after remove, GetAttribute = %q, want empty", prop.GetAttribute("Value", "V"))
+	}
+
+	// Remove non-existent attribute
+	if prop.RemoveAttribute("Value", "NonExistent") {
+		t.Error("RemoveAttribute returned true for non-existent attr")
+	}
+}
+
+// --- Save/load round-trip with edits ---
+
+func TestEditAndSaveRoundTrip(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Make edits
+	page := vis.GetPage(0)
+	page.SetName("EditedPage")
+
+	shape := page.FindShapeByText("Shape Text")
+	if shape != nil {
+		shape.SetX(5.0)
+		shape.SetY(6.0)
+		shape.SetText("Edited Shape Text")
+	}
+
+	// Save
+	outFile := filepath.Join(testDir, "out", "test1_edited.vsdx")
+	os.MkdirAll(filepath.Join(testDir, "out"), 0755)
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatalf("SaveVsdx: %v", err)
+	}
+	vis.Close()
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	defer vis2.Close()
+
+	if vis2.GetPage(0).Name() != "EditedPage" {
+		t.Errorf("page name = %q, want 'EditedPage'", vis2.GetPage(0).Name())
+	}
+
+	editedShape := vis2.GetPage(0).FindShapeByText("Edited Shape Text")
+	if editedShape == nil {
+		t.Fatal("edited shape not found after save/reload")
+	}
+	if editedShape.X() != 5.0 {
+		t.Errorf("X() = %v, want 5.0", editedShape.X())
+	}
+	if editedShape.Y() != 6.0 {
+		t.Errorf("Y() = %v, want 6.0", editedShape.Y())
 	}
 }
 

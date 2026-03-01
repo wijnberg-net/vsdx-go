@@ -1,6 +1,10 @@
 package vsdx
 
 import (
+	"sort"
+	"strconv"
+	"strings"
+
 	"github.com/beevik/etree"
 )
 
@@ -70,6 +74,53 @@ func (g *Geometry) StartPos() (float64, float64) {
 	return 0, 0
 }
 
+// Move updates absolute coordinate references in the geometry by the given deltas.
+func (g *Geometry) Move(xDelta, yDelta float64) {
+	for _, r := range g.Rows {
+		rt := strings.ToLower(r.RowType())
+		if rt == "moveto" || rt == "lineto" {
+			if cell := r.Cells["X"]; cell != nil {
+				v := toFloat(cell.Value())
+				cell.SetValue(strconv.FormatFloat(v+xDelta, 'f', -1, 64))
+			}
+			if cell := r.Cells["Y"]; cell != nil {
+				v := toFloat(cell.Value())
+				cell.SetValue(strconv.FormatFloat(v+yDelta, 'f', -1, 64))
+			}
+		}
+	}
+}
+
+// SetMoveTo sets the coordinates of a MoveTo row at the given index (0-based).
+func (g *Geometry) SetMoveTo(x, y float64, moveToIndex int) {
+	var moveTos []*GeometryRow
+	for _, r := range g.Rows {
+		if strings.ToLower(r.RowType()) == "moveto" {
+			moveTos = append(moveTos, r)
+		}
+	}
+	if moveToIndex < len(moveTos) {
+		moveTo := moveTos[moveToIndex]
+		moveTo.SetX(x)
+		moveTo.SetY(y)
+	}
+}
+
+// SetLineTo sets the coordinates of a LineTo row at the given index (0-based).
+func (g *Geometry) SetLineTo(x, y float64, lineToIndex int) {
+	var lineTos []*GeometryRow
+	for _, r := range g.Rows {
+		if strings.ToLower(r.RowType()) == "lineto" {
+			lineTos = append(lineTos, r)
+		}
+	}
+	if lineToIndex < len(lineTos) {
+		lineTo := lineTos[lineToIndex]
+		lineTo.SetX(x)
+		lineTo.SetY(y)
+	}
+}
+
 // GeometryRow represents a row within a Geometry section.
 // Each row has a type (T attribute) and index (IX attribute), and contains Cell elements.
 type GeometryRow struct {
@@ -132,6 +183,98 @@ func (r *GeometryRow) DelBool() bool {
 	return r.xml.SelectAttrValue("Del", "") != ""
 }
 
+// --- GeometryRow setters ---
+
+// SetRowType sets the T attribute of the row.
+func (r *GeometryRow) SetRowType(v string) {
+	r.xml.CreateAttr("T", v)
+}
+
+// SetIndex sets the IX attribute of the row.
+func (r *GeometryRow) SetIndex(v string) {
+	r.xml.CreateAttr("IX", v)
+}
+
+// SetX sets the X cell value, creating it if needed.
+func (r *GeometryRow) SetX(v float64) {
+	xCell := r.Cells["X"]
+	if xCell == nil {
+		cellElem := etree.NewElement("Cell")
+		cellElem.CreateAttr("N", "X")
+		r.xml.AddChild(cellElem)
+		xCell = newGeometryCell(r, cellElem)
+		r.Cells["X"] = xCell
+	}
+	xCell.SetValue(strconv.FormatFloat(v, 'f', -1, 64))
+}
+
+// SetY sets the Y cell value, creating it if needed.
+func (r *GeometryRow) SetY(v float64) {
+	yCell := r.Cells["Y"]
+	if yCell == nil {
+		cellElem := etree.NewElement("Cell")
+		cellElem.CreateAttr("N", "Y")
+		r.xml.AddChild(cellElem)
+		yCell = newGeometryCell(r, cellElem)
+		r.Cells["Y"] = yCell
+	}
+	yCell.SetValue(strconv.FormatFloat(v, 'f', -1, 64))
+}
+
+// SetDelBool sets or removes the Del attribute on the row.
+func (r *GeometryRow) SetDelBool(v bool) {
+	if v {
+		r.xml.CreateAttr("Del", "1")
+	} else {
+		r.xml.RemoveAttr("Del")
+	}
+}
+
+// CreateRowXML creates a new Row XML element and inserts it into the geometry section.
+func (r *GeometryRow) CreateRowXML(rowType, ix string) *etree.Element {
+	if rowType == "" || ix == "" {
+		return nil
+	}
+	row := etree.NewElement("Row")
+	row.CreateAttr("T", rowType)
+	row.CreateAttr("IX", ix)
+
+	// Get all existing indexes and insert in sorted order
+	var indexes []string
+	for _, rowElem := range r.geometry.xml.SelectElements("Row") {
+		if idx := rowElem.SelectAttrValue("IX", ""); idx != "" {
+			indexes = append(indexes, idx)
+		}
+	}
+	if contains(indexes, ix) {
+		return nil // Index already exists
+	}
+	indexes = append(indexes, ix)
+	sort.Strings(indexes)
+
+	// Find insertion position
+	pos := 0
+	for i, idx := range indexes {
+		if idx == ix {
+			pos = i
+			break
+		}
+	}
+	r.geometry.xml.InsertChildAt(pos, row)
+	r.geometry.Rows[ix] = r
+	r.xml = row
+	return row
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 // GeometryCell represents a Cell element within a Geometry section or row.
 type GeometryCell struct {
 	parent interface{} // *Geometry or *GeometryRow
@@ -165,4 +308,28 @@ func (c *GeometryCell) Name() string {
 // Func returns the F attribute value (alias for Formula, as F represents a function/formula).
 func (c *GeometryCell) Func() string {
 	return c.Formula()
+}
+
+// --- GeometryCell setters ---
+
+// SetFormula sets the F attribute.
+func (c *GeometryCell) SetFormula(f string) {
+	c.xml.CreateAttr("F", f)
+}
+
+// SetName sets the N attribute.
+func (c *GeometryCell) SetName(n string) {
+	c.xml.CreateAttr("N", n)
+}
+
+// CreateCellXML creates a new Cell XML element and adds it to the parent row.
+func (c *GeometryCell) CreateCellXML(name string) *etree.Element {
+	cell := etree.NewElement("Cell")
+	cell.CreateAttr("N", name)
+	if parentRow, ok := c.parent.(*GeometryRow); ok {
+		parentRow.xml.AddChild(cell)
+		parentRow.Cells[name] = c
+	}
+	c.xml = cell
+	return cell
 }

@@ -189,6 +189,90 @@ func (s *Shape) HasCell(name string) bool {
 	return s.CellValue(name) != ""
 }
 
+// --- Cell editing ---
+
+// SetCellValue sets the value of a named cell, creating it if it doesn't exist.
+// If a master shape has the cell, the new cell is copied from the master.
+func (s *Shape) SetCellValue(name, value string) {
+	if cell, ok := s.Cells[name]; ok {
+		cell.SetValue(value)
+		return
+	}
+	// Create new cell element
+	cellElem := etree.NewElement("Cell")
+	cellElem.CreateAttr("N", name)
+
+	// Copy attributes from master cell if available
+	if s.MasterPageID != "" {
+		if ms := s.MasterShape(); ms != nil {
+			if masterCell, ok := ms.Cells[name]; ok {
+				for _, attr := range masterCell.xml.Attr {
+					if attr.Key != "V" { // don't copy value from master
+						cellElem.CreateAttr(attr.Key, attr.Value)
+					}
+				}
+			}
+		}
+	}
+
+	// Insert after last Cell element in shape XML
+	cells := s.xml.SelectElements("Cell")
+	if len(cells) > 0 {
+		lastCell := cells[len(cells)-1]
+		insertAfter(s.xml, lastCell, cellElem)
+	} else {
+		s.xml.InsertChildAt(0, cellElem)
+	}
+
+	cell := newCell(cellElem, s)
+	cell.SetValue(value)
+	s.Cells[name] = cell
+}
+
+// SetCellFormula sets the formula of a named cell, creating it if it doesn't exist.
+func (s *Shape) SetCellFormula(name, formula string) {
+	if cell, ok := s.Cells[name]; ok {
+		cell.SetFormula(formula)
+		return
+	}
+	// Create new cell element
+	cellElem := etree.NewElement("Cell")
+	cellElem.CreateAttr("N", name)
+
+	// Copy attributes from master cell if available
+	if s.MasterPageID != "" {
+		if ms := s.MasterShape(); ms != nil {
+			if masterCell, ok := ms.Cells[name]; ok {
+				for _, attr := range masterCell.xml.Attr {
+					if attr.Key != "F" { // don't copy formula from master
+						cellElem.CreateAttr(attr.Key, attr.Value)
+					}
+				}
+			}
+		}
+	}
+
+	// Insert after last Cell element in shape XML
+	cells := s.xml.SelectElements("Cell")
+	if len(cells) > 0 {
+		lastCell := cells[len(cells)-1]
+		insertAfter(s.xml, lastCell, cellElem)
+	} else {
+		s.xml.InsertChildAt(0, cellElem)
+	}
+
+	cell := newCell(cellElem, s)
+	cell.SetFormula(formula)
+	s.Cells[name] = cell
+}
+
+// insertAfter inserts newElem after refElem in parent's children.
+func insertAfter(parent, refElem, newElem *etree.Element) {
+	// Insert after refElem by using its index in the token list
+	refIndex := refElem.Index()
+	parent.InsertChildAt(refIndex+1, newElem)
+}
+
 // --- Position and size properties ---
 
 func (s *Shape) X() float64      { return toFloat(s.CellValue("PinX")) }
@@ -208,6 +292,21 @@ func (s *Shape) HasBeginX() bool { return s.CellValue("BeginX") != "" }
 
 func (s *Shape) LocXFormula() string { return s.CellFormula("LocPinX") }
 func (s *Shape) LocYFormula() string { return s.CellFormula("LocPinY") }
+
+// --- Position and size setters ---
+
+func (s *Shape) SetX(v float64)      { s.SetCellValue("PinX", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetY(v float64)      { s.SetCellValue("PinY", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetLocX(v float64)   { s.SetCellValue("LocPinX", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetLocY(v float64)   { s.SetCellValue("LocPinY", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetWidth(v float64)  { s.SetCellValue("Width", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetHeight(v float64) { s.SetCellValue("Height", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetAngle(v float64)  { s.SetCellValue("Angle", strconv.FormatFloat(v, 'f', -1, 64)) }
+
+func (s *Shape) SetBeginX(v float64) { s.SetCellValue("BeginX", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetBeginY(v float64) { s.SetCellValue("BeginY", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetEndX(v float64)   { s.SetCellValue("EndX", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetEndY(v float64)   { s.SetCellValue("EndY", strconv.FormatFloat(v, 'f', -1, 64)) }
 
 // --- Style properties ---
 
@@ -240,6 +339,40 @@ func (s *Shape) FillStyleID() string { return s.xml.SelectAttrValue("FillStyle",
 // TextStyleID returns the TextStyle attribute.
 func (s *Shape) TextStyleID() string { return s.xml.SelectAttrValue("TextStyle", "") }
 
+// --- Style setters ---
+
+func (s *Shape) SetLineWeight(v float64) {
+	s.SetCellValue("LineWeight", strconv.FormatFloat(v, 'f', -1, 64))
+}
+func (s *Shape) SetLineColor(v string)   { s.SetCellValue("LineColor", v) }
+func (s *Shape) SetFillColor(v string)   { s.SetCellValue("FillForegnd", v) }
+
+// SetTextColor sets the first text color in the Character section.
+func (s *Shape) SetTextColor(v string) {
+	charSection := s.xml.FindElement("Section[@N='Character']")
+	if charSection == nil {
+		return
+	}
+	colorCell := charSection.FindElement("Row/Cell[@N='Color']")
+	if colorCell != nil {
+		colorCell.CreateAttr("V", v)
+	}
+}
+
+// SetEndArrow sets the EndArrow cell value. Use 13 for standard arrow, 0 for none.
+func (s *Shape) SetEndArrow(v int) {
+	s.SetCellValue("EndArrow", strconv.Itoa(v))
+}
+
+// SetLineStyleID sets the LineStyle attribute on the shape element.
+func (s *Shape) SetLineStyleID(v string) { s.xml.CreateAttr("LineStyle", v) }
+
+// SetFillStyleID sets the FillStyle attribute on the shape element.
+func (s *Shape) SetFillStyleID(v string) { s.xml.CreateAttr("FillStyle", v) }
+
+// SetTextStyleID sets the TextStyle attribute on the shape element.
+func (s *Shape) SetTextStyleID(v string) { s.xml.CreateAttr("TextStyle", v) }
+
 // --- Text ---
 
 // Text returns the text content of the shape. Falls back to master shape text.
@@ -254,6 +387,89 @@ func (s *Shape) Text() string {
 		}
 	}
 	return ""
+}
+
+// SetText sets the text content of the shape. Clears existing sub-element text.
+func (s *Shape) SetText(text string) {
+	textElem := s.xml.FindElement("Text")
+	if textElem != nil {
+		clearAllText(textElem)
+		textElem.SetText(text)
+	}
+}
+
+// clearAllText recursively clears text content from an element and its children.
+func clearAllText(e *etree.Element) {
+	e.SetText("")
+	e.SetTail("")
+	for _, child := range e.ChildElements() {
+		clearAllText(child)
+	}
+}
+
+// --- Shape manipulation ---
+
+// Move moves the shape by the given deltas, updating position and geometry.
+func (s *Shape) Move(xDelta, yDelta float64) {
+	if s.Geometry != nil {
+		s.Geometry.Move(xDelta, yDelta)
+	}
+	if s.HasBeginX() {
+		s.SetBeginX(s.BeginX() + xDelta)
+		s.SetBeginY(s.BeginY() + yDelta)
+	}
+	s.SetX(s.X() + xDelta)
+	s.SetY(s.Y() + yDelta)
+}
+
+// Remove removes this shape from its parent XML element.
+func (s *Shape) Remove() {
+	switch p := s.Parent.(type) {
+	case *Shape:
+		p.xml.RemoveChild(s.xml)
+	case *Page:
+		if p.xml != nil && p.xml.Root() != nil {
+			// Remove from Shapes container
+			for _, shapesElem := range p.xml.Root().SelectElements("Shapes") {
+				shapesElem.RemoveChild(s.xml)
+			}
+		}
+	}
+}
+
+// FindReplace finds and replaces text in this shape and all sub-shapes.
+func (s *Shape) FindReplace(old, new string) {
+	text := s.Text()
+	s.SetText(strings.Replace(text, old, new, -1))
+	for _, child := range s.ChildShapes() {
+		child.FindReplace(old, new)
+	}
+}
+
+// ApplyTextFilter replaces {{key}} placeholders in shape text with context values.
+func (s *Shape) ApplyTextFilter(context map[string]string) {
+	text := s.Text()
+	for key, value := range context {
+		rKey := "{{" + key + "}}"
+		text = strings.Replace(text, rKey, value, -1)
+	}
+	s.SetText(text)
+	for _, child := range s.ChildShapes() {
+		child.ApplyTextFilter(context)
+	}
+}
+
+// RelativeBounds returns bounds relative to parent group shape.
+func (s *Shape) RelativeBounds() (float64, float64, float64, float64) {
+	bx, by, ex, ey := s.Bounds()
+	if parentShape, ok := s.Parent.(*Shape); ok && parentShape.ShapeType == "Group" {
+		pbx, pby, _, _ := parentShape.Bounds()
+		bx += pbx
+		by += pby
+		ex += pbx
+		ey += pby
+	}
+	return bx, by, ex, ey
 }
 
 // --- Child shapes ---
