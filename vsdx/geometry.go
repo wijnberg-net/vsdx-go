@@ -2,7 +2,6 @@ package vsdx
 
 import (
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/beevik/etree"
@@ -60,6 +59,12 @@ func newGeometry(xml *etree.Element, shape *Shape) *Geometry {
 	return g
 }
 
+// StartPoint returns the start position of the geometry as a Point.
+func (g *Geometry) StartPoint() Point {
+	x, y := g.StartPos()
+	return Point{X: x, Y: y}
+}
+
 // StartPos returns the start position of the geometry based on the first MoveTo or RelMoveTo row.
 func (g *Geometry) StartPos() (float64, float64) {
 	for _, row := range g.Rows {
@@ -81,44 +86,38 @@ func (g *Geometry) Move(xDelta, yDelta float64) {
 		if rt == "moveto" || rt == "lineto" {
 			if cell := r.Cells["X"]; cell != nil {
 				v := toFloat(cell.Value())
-				cell.SetValue(strconv.FormatFloat(v+xDelta, 'f', -1, 64))
+				cell.SetValue(fmtFloat(v + xDelta))
 			}
 			if cell := r.Cells["Y"]; cell != nil {
 				v := toFloat(cell.Value())
-				cell.SetValue(strconv.FormatFloat(v+yDelta, 'f', -1, 64))
+				cell.SetValue(fmtFloat(v + yDelta))
 			}
 		}
+	}
+}
+
+// setRowCoords sets the X, Y coordinates of the nth row of the given type.
+func (g *Geometry) setRowCoords(rowType string, x, y float64, index int) {
+	var matching []*GeometryRow
+	for _, r := range g.Rows {
+		if strings.ToLower(r.RowType()) == rowType {
+			matching = append(matching, r)
+		}
+	}
+	if index < len(matching) {
+		matching[index].SetX(x)
+		matching[index].SetY(y)
 	}
 }
 
 // SetMoveTo sets the coordinates of a MoveTo row at the given index (0-based).
 func (g *Geometry) SetMoveTo(x, y float64, moveToIndex int) {
-	var moveTos []*GeometryRow
-	for _, r := range g.Rows {
-		if strings.ToLower(r.RowType()) == "moveto" {
-			moveTos = append(moveTos, r)
-		}
-	}
-	if moveToIndex < len(moveTos) {
-		moveTo := moveTos[moveToIndex]
-		moveTo.SetX(x)
-		moveTo.SetY(y)
-	}
+	g.setRowCoords("moveto", x, y, moveToIndex)
 }
 
 // SetLineTo sets the coordinates of a LineTo row at the given index (0-based).
 func (g *Geometry) SetLineTo(x, y float64, lineToIndex int) {
-	var lineTos []*GeometryRow
-	for _, r := range g.Rows {
-		if strings.ToLower(r.RowType()) == "lineto" {
-			lineTos = append(lineTos, r)
-		}
-	}
-	if lineToIndex < len(lineTos) {
-		lineTo := lineTos[lineToIndex]
-		lineTo.SetX(x)
-		lineTo.SetY(y)
-	}
+	g.setRowCoords("lineto", x, y, lineToIndex)
 }
 
 // GeometryRow represents a row within a Geometry section.
@@ -205,7 +204,7 @@ func (r *GeometryRow) SetX(v float64) {
 		xCell = newGeometryCell(r, cellElem)
 		r.Cells["X"] = xCell
 	}
-	xCell.SetValue(strconv.FormatFloat(v, 'f', -1, 64))
+	xCell.SetValue(fmtFloat(v))
 }
 
 // SetY sets the Y cell value, creating it if needed.
@@ -218,7 +217,7 @@ func (r *GeometryRow) SetY(v float64) {
 		yCell = newGeometryCell(r, cellElem)
 		r.Cells["Y"] = yCell
 	}
-	yCell.SetValue(strconv.FormatFloat(v, 'f', -1, 64))
+	yCell.SetValue(fmtFloat(v))
 }
 
 // SetDelBool sets or removes the Del attribute on the row.
@@ -275,13 +274,21 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+// GeometryCellParent is the interface for types that can contain geometry cells.
+type GeometryCellParent interface {
+	geometryCellParent()
+}
+
+func (*Geometry) geometryCellParent()    {}
+func (*GeometryRow) geometryCellParent() {}
+
 // GeometryCell represents a Cell element within a Geometry section or row.
 type GeometryCell struct {
-	parent interface{} // *Geometry or *GeometryRow
+	parent GeometryCellParent // *Geometry or *GeometryRow
 	xml    *etree.Element
 }
 
-func newGeometryCell(parent interface{}, xml *etree.Element) *GeometryCell {
+func newGeometryCell(parent GeometryCellParent, xml *etree.Element) *GeometryCell {
 	return &GeometryCell{parent: parent, xml: xml}
 }
 

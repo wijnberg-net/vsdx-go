@@ -1876,8 +1876,10 @@ func TestAddPage(t *testing.T) {
 	defer vis.Close()
 
 	origCount := len(vis.Pages)
-	newPage := vis.AddPage("TestNewPage")
-
+	newPage, err := vis.AddPage("TestNewPage")
+	if err != nil {
+		t.Fatalf("AddPage: %v", err)
+	}
 	if newPage == nil {
 		t.Fatal("AddPage returned nil")
 	}
@@ -1901,8 +1903,10 @@ func TestAddPageAt(t *testing.T) {
 	defer vis.Close()
 
 	origCount := len(vis.Pages)
-	newPage := vis.AddPageAt(0, "FirstPage")
-
+	newPage, err := vis.AddPageAt(0, "FirstPage")
+	if err != nil {
+		t.Fatalf("AddPageAt: %v", err)
+	}
 	if newPage == nil {
 		t.Fatal("AddPageAt returned nil")
 	}
@@ -1925,8 +1929,10 @@ func TestAddPageDuplicateName(t *testing.T) {
 	defer vis.Close()
 
 	existingName := vis.Pages[0].Name()
-	newPage := vis.AddPage(existingName)
-
+	newPage, err := vis.AddPage(existingName)
+	if err != nil {
+		t.Fatalf("AddPage: %v", err)
+	}
 	if newPage.Name() == existingName {
 		t.Errorf("expected unique name, got duplicate: %q", newPage.Name())
 	}
@@ -1943,7 +1949,9 @@ func TestAddPageAndSave(t *testing.T) {
 	}
 	defer vis.Close()
 
-	vis.AddPage("NewSavedPage")
+	if _, err := vis.AddPage("NewSavedPage"); err != nil {
+		t.Fatalf("AddPage: %v", err)
+	}
 
 	outFile := filepath.Join(t.TempDir(), "added_page.vsdx")
 	if err := vis.SaveVsdx(outFile); err != nil {
@@ -1980,8 +1988,10 @@ func TestCopyPage(t *testing.T) {
 	origShapeCount := len(origPage.ChildShapes())
 	origCount := len(vis.Pages)
 
-	newPage := vis.CopyPage(origPage, int(PageAfter), "CopiedPage")
-
+	newPage, err := vis.CopyPage(origPage, int(PageAfter), "CopiedPage")
+	if err != nil {
+		t.Fatalf("CopyPage: %v", err)
+	}
 	if newPage == nil {
 		t.Fatal("CopyPage returned nil")
 	}
@@ -2007,7 +2017,9 @@ func TestCopyPageAndSave(t *testing.T) {
 	defer vis.Close()
 
 	origPage := vis.Pages[0]
-	vis.CopyPage(origPage, int(PageLast), "CopyTest")
+	if _, err := vis.CopyPage(origPage, int(PageLast), "CopyTest"); err != nil {
+		t.Fatalf("CopyPage: %v", err)
+	}
 
 	outFile := filepath.Join(t.TempDir(), "copied_page.vsdx")
 	if err := vis.SaveVsdx(outFile); err != nil {
@@ -2086,7 +2098,10 @@ func TestCopyShapeAndSave(t *testing.T) {
 	}
 
 	// Add a new empty page and copy shape to it
-	newPage := vis.AddPage("ShapeCopyDst")
+	newPage, err := vis.AddPage("ShapeCopyDst")
+	if err != nil {
+		t.Fatalf("AddPage: %v", err)
+	}
 	vis.CopyShape(srcShapes[0].XML(), newPage)
 
 	outFile := filepath.Join(t.TempDir(), "shape_copied.vsdx")
@@ -2299,7 +2314,7 @@ func TestRenderTemplateBasicTextReplacement(t *testing.T) {
 	}
 	defer vis.Close()
 
-	context := map[string]interface{}{
+	context := map[string]any{
 		"date":     "2024-01-15",
 		"scenario": "Scenario One",
 		"x":        2,
@@ -2322,7 +2337,7 @@ func TestRenderTemplateCalc(t *testing.T) {
 	}
 	defer vis.Close()
 
-	context := map[string]interface{}{
+	context := map[string]any{
 		"date":     "2024-01-15",
 		"scenario": "Test",
 		"x":        3,
@@ -2356,7 +2371,7 @@ func TestRenderTemplateShowIfShapes(t *testing.T) {
 			}
 			defer vis.Close()
 
-			context := map[string]interface{}{
+			context := map[string]any{
 				"date":     "now",
 				"scenario": "Test",
 				"x":        tt.x,
@@ -2380,10 +2395,10 @@ func TestRenderTemplateForLoop(t *testing.T) {
 	}
 	defer vis.Close()
 
-	context := map[string]interface{}{
+	context := map[string]any{
 		"date":      "2024-01-15",
 		"scenario":  "Scenario One",
-		"test_list": []interface{}{1, 2, 3},
+		"test_list": []any{1, 2, 3},
 	}
 	vis.RenderTemplate(context)
 
@@ -2410,10 +2425,10 @@ func TestRenderTemplateForLoopStrings(t *testing.T) {
 	}
 	defer vis.Close()
 
-	context := map[string]interface{}{
+	context := map[string]any{
 		"date":      "2024-01-15",
 		"scenario":  "Scenario Two",
-		"test_list": []interface{}{"One", "Two", "Three"},
+		"test_list": []any{"One", "Two", "Three"},
 	}
 	vis.RenderTemplate(context)
 
@@ -2427,7 +2442,7 @@ func TestRenderTemplateForLoopStrings(t *testing.T) {
 
 func TestRenderTemplatePageShowIf(t *testing.T) {
 	tests := []struct {
-		show          interface{}
+		show          any
 		pageCount     int
 		expectedNames []string
 	}{
@@ -2444,7 +2459,7 @@ func TestRenderTemplatePageShowIf(t *testing.T) {
 			}
 			defer vis.Close()
 
-			context := map[string]interface{}{"show": tt.show}
+			context := map[string]any{"show": tt.show}
 			vis.RenderTemplate(context)
 
 			if len(vis.Pages) != tt.pageCount {
@@ -2483,7 +2498,7 @@ func TestRenderTemplateSetSelf(t *testing.T) {
 			}
 			defer vis.Close()
 
-			context := map[string]interface{}{"n": tt.n}
+			context := map[string]any{"n": tt.n}
 			vis.RenderTemplate(context)
 
 			page := vis.Pages[0]
@@ -2506,7 +2521,7 @@ func TestRenderTemplateSetSelfText(t *testing.T) {
 	}
 	defer vis.Close()
 
-	context := map[string]interface{}{"n": 1}
+	context := map[string]any{"n": 1}
 	vis.RenderTemplate(context)
 
 	page := vis.Pages[0]
@@ -2532,7 +2547,7 @@ func TestRenderTemplateAndSave(t *testing.T) {
 	}
 	defer vis.Close()
 
-	context := map[string]interface{}{
+	context := map[string]any{
 		"date":     "2024-01-15",
 		"scenario": "SaveTest",
 		"x":        5,

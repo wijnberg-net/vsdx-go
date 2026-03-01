@@ -2,7 +2,6 @@ package vsdx
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/beevik/etree"
 )
@@ -87,7 +86,7 @@ func (p *Page) Width() float64 {
 	if ps == nil {
 		return 0
 	}
-	cell := ps.FindElement("Cell[@N='PageWidth']")
+	cell := ps.FindElement("Cell[@N='" + CellPageWidth + "']")
 	if cell == nil {
 		return 0
 	}
@@ -100,7 +99,7 @@ func (p *Page) Height() float64 {
 	if ps == nil {
 		return 0
 	}
-	cell := ps.FindElement("Cell[@N='PageHeight']")
+	cell := ps.FindElement("Cell[@N='" + CellPageHeight + "']")
 	if cell == nil {
 		return 0
 	}
@@ -302,10 +301,10 @@ func (p *Page) GetConnectorsBetween(shapeAID, shapeAText, shapeBID, shapeBText s
 	}
 
 	if shapeA == nil {
-		return nil, fmt.Errorf("shape A not found (id=%q text=%q)", shapeAID, shapeAText)
+		return nil, fmt.Errorf("shape A (id=%q text=%q): %w", shapeAID, shapeAText, ErrShapeNotFound)
 	}
 	if shapeB == nil {
-		return nil, fmt.Errorf("shape B not found (id=%q text=%q)", shapeBID, shapeBText)
+		return nil, fmt.Errorf("shape B (id=%q text=%q): %w", shapeBID, shapeBText, ErrShapeNotFound)
 	}
 
 	// Get connected shape IDs for each shape
@@ -354,9 +353,9 @@ func (p *Page) SetWidth(width float64) {
 	if ps == nil {
 		return
 	}
-	cell := ps.FindElement("Cell[@N='PageWidth']")
+	cell := ps.FindElement("Cell[@N='" + CellPageWidth + "']")
 	if cell != nil {
-		cell.CreateAttr("V", strconv.FormatFloat(width, 'f', -1, 64))
+		cell.CreateAttr("V", fmtFloat(width))
 	}
 }
 
@@ -366,9 +365,18 @@ func (p *Page) SetHeight(height float64) {
 	if ps == nil {
 		return
 	}
-	cell := ps.FindElement("Cell[@N='PageHeight']")
+	cell := ps.FindElement("Cell[@N='" + CellPageHeight + "']")
 	if cell != nil {
-		cell.CreateAttr("V", strconv.FormatFloat(height, 'f', -1, 64))
+		cell.CreateAttr("V", fmtFloat(height))
+	}
+}
+
+// removeChildShape removes a child shape from this page's Shapes container XML.
+func (p *Page) removeChildShape(s *Shape) {
+	if p.xml != nil && p.xml.Root() != nil {
+		for _, shapesElem := range p.xml.Root().SelectElements("Shapes") {
+			shapesElem.RemoveChild(s.xml)
+		}
 	}
 }
 

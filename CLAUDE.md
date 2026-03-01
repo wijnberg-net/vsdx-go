@@ -110,17 +110,24 @@ vsdx-go/
 ├── README.md            # Library documentatie met voorbeelden
 ├── CLAUDE.md            # AI-assistentie context
 ├── vsdx/
-│   ├── vsdxfile.go      # VisioFile struct + Open/Close/SaveVsdx (369 lines)
-│   ├── page.go          # Page struct + search/edit methods (400 lines)
-│   ├── shape.go         # Shape struct + position/text/style/search (765 lines)
-│   ├── cell.go          # Cell struct (name/value/formula) (43 lines)
-│   ├── data_property.go # DataProperty struct (master inheritance) (123 lines)
-│   ├── connect.go       # Connect struct (from/to relationships) (52 lines)
-│   ├── geometry.go      # Geometry/GeometryRow/GeometryCell (335 lines)
-│   ├── formula.go       # CalcValue formula evaluation (35 lines)
-│   ├── namespace.go     # XML namespace constants (14 lines)
-│   ├── util.go          # File writing helper (15 lines)
-│   └── vsdx_test.go     # 55 test cases (1827 lines)
+│   ├── doc.go           # Package-level documentatie
+│   ├── vsdxfile.go      # VisioFile struct + Open/Close/SaveVsdx
+│   ├── page.go          # Page struct + search/edit methods
+│   ├── shape.go         # Shape struct + position/text/style/search
+│   ├── cell.go          # Cell struct (name/value/formula)
+│   ├── cellname.go      # CellName type alias + cell/connect constants
+│   ├── data_property.go # DataProperty struct (master inheritance)
+│   ├── connect.go       # Connect struct (from/to relationships)
+│   ├── geometry.go      # Geometry/GeometryRow/GeometryCell
+│   ├── formula.go       # CalcValue formula evaluation
+│   ├── namespace.go     # XML namespace constants
+│   ├── errors.go        # Sentinel errors + FileError type
+│   ├── types.go         # Point, Rect result structs
+│   ├── util.go          # File writing helper
+│   ├── media.go         # Media struct with embedded template shapes
+│   ├── template.go      # RenderTemplate with Jinja2-style directives
+│   ├── diff.go          # VisioFileDiff with LCS-based comparison
+│   └── vsdx_test.go     # 95 test cases
 ├── tests/
 │   └── *.vsdx           # Test fixtures (15+ files)
 └── vsdx/*.py            # Original Python source files (reference, co-located)
@@ -174,7 +181,8 @@ cd /home/michel/vsdx-go && python -m pytest tests/ -v
 
 ## Huidige Status
 
-- 11 Go source bestanden, ~2150 lines code + ~1830 lines tests = ~3980 total
-- 55 test cases (alle passing)
-- Fasen 1-3 compleet: lezen, navigatie, bewerken, opslaan
+- 17 Go source bestanden, ~2800 lines code + ~1850 lines tests = ~4650 total
+- 95 test cases (alle passing)
+- Fasen 1-7 compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
+- Idiomatisch Go refactoring compleet: cell constants, error types, typed interfaces, deduplication
 - Afhankelijkheid: `github.com/beevik/etree` v1.4.1

@@ -44,7 +44,7 @@ type VisioFile struct {
 func Open(filename string) (*VisioFile, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
 	if ext != ".vsdx" && ext != ".vsdm" {
-		return nil, fmt.Errorf("invalid file type: %s", ext)
+		return nil, &FileError{Path: filename, Err: ErrInvalidFileType}
 	}
 
 	v := &VisioFile{
@@ -103,8 +103,10 @@ func OpenBytes(data []byte) (*VisioFile, error) {
 }
 
 // Close releases resources associated with the VisioFile.
-func (v *VisioFile) Close() {
+// It implements the io.Closer interface.
+func (v *VisioFile) Close() error {
 	v.ZipFileContents = nil
+	return nil
 }
 
 // loadZipContents reads all files from the ZIP archive into memory.
@@ -154,7 +156,7 @@ func (v *VisioFile) loadPages() error {
 		return fmt.Errorf("loading pages.xml.rels: %w", err)
 	}
 	if relsDoc == nil {
-		return fmt.Errorf("pages.xml.rels not found")
+		return fmt.Errorf("%w: pages.xml.rels not found", ErrInvalidFormat)
 	}
 	v.pagesXMLRels = relsDoc
 
@@ -172,7 +174,7 @@ func (v *VisioFile) loadPages() error {
 		return fmt.Errorf("loading pages.xml: %w", err)
 	}
 	if pagesDoc == nil {
-		return fmt.Errorf("pages.xml not found")
+		return fmt.Errorf("%w: pages.xml not found", ErrInvalidFormat)
 	}
 	v.pagesXML = pagesDoc
 
@@ -216,10 +218,22 @@ func (v *VisioFile) loadPages() error {
 	}
 
 	// Load other XML files
-	v.contentTypesXML, _ = v.fileToXML("[Content_Types].xml")
-	v.appXML, _ = v.fileToXML("docProps/app.xml")
-	v.documentXML, _ = v.fileToXML("visio/document.xml")
-	v.documentXMLRels, _ = v.fileToXML("visio/_rels/document.xml.rels")
+	v.contentTypesXML, err = v.fileToXML("[Content_Types].xml")
+	if err != nil {
+		return fmt.Errorf("loading [Content_Types].xml: %w", err)
+	}
+	v.appXML, err = v.fileToXML("docProps/app.xml")
+	if err != nil {
+		return fmt.Errorf("loading app.xml: %w", err)
+	}
+	v.documentXML, err = v.fileToXML("visio/document.xml")
+	if err != nil {
+		return fmt.Errorf("loading document.xml: %w", err)
+	}
+	v.documentXMLRels, err = v.fileToXML("visio/_rels/document.xml.rels")
+	if err != nil {
+		return fmt.Errorf("loading document.xml.rels: %w", err)
+	}
 
 	return nil
 }
@@ -379,12 +393,12 @@ func (v *VisioFile) RemovePageByName(name string) {
 }
 
 // AddPage adds a new empty page at the end of the VisioFile.
-func (v *VisioFile) AddPage(name string) *Page {
+func (v *VisioFile) AddPage(name string) (*Page, error) {
 	return v.AddPageAt(int(PageLast), name)
 }
 
 // AddPageAt adds a new empty page at the specified index (or PagePosition).
-func (v *VisioFile) AddPageAt(index int, name string) *Page {
+func (v *VisioFile) AddPageAt(index int, name string) (*Page, error) {
 	// Determine page name
 	if name == "" {
 		name = fmt.Sprintf("Page-%d", len(v.Pages)+1)
@@ -442,7 +456,7 @@ func (v *VisioFile) AddPageAt(index int, name string) *Page {
 }
 
 // CopyPage copies an existing page and inserts at the given index (or PagePosition).
-func (v *VisioFile) CopyPage(page *Page, index int, name string) *Page {
+func (v *VisioFile) CopyPage(page *Page, index int, name string) (*Page, error) {
 	if name == "" {
 		name = page.Name()
 	}
@@ -460,7 +474,7 @@ func (v *VisioFile) CopyPage(page *Page, index int, name string) *Page {
 		}
 	}
 	if sourcePageElem == nil {
-		return nil
+		return nil, fmt.Errorf("source page %q not found in pages.xml", page.Name())
 	}
 
 	// Deep copy the page element
@@ -476,10 +490,16 @@ func (v *VisioFile) CopyPage(page *Page, index int, name string) *Page {
 	}
 
 	// Serialize source page content XML
-	pageContentBytes, _ := page.xml.WriteToBytes()
+	pageContentBytes, err := page.xml.WriteToBytes()
+	if err != nil {
+		return nil, fmt.Errorf("serializing page %q content: %w", page.Name(), err)
+	}
 	pageContentXML := string(pageContentBytes)
 
-	newPage := v.createPage(pageContentXML, name, newPageElem, index, page)
+	newPage, err := v.createPage(pageContentXML, name, newPageElem, index, page)
+	if err != nil {
+		return nil, err
+	}
 
 	// Copy page rels if they exist
 	origFilename := filepath.Base(page.filename)
@@ -491,7 +511,7 @@ func (v *VisioFile) CopyPage(page *Page, index int, name string) *Page {
 		v.ZipFileContents[newPageRelsPath] = relsDataCopy
 	}
 
-	return newPage
+	return newPage, nil
 }
 
 // CopyShape copies a shape element into the destination page, assigning new IDs.
@@ -688,10 +708,12 @@ func (v *VisioFile) removePageFromAppXML(pageName string) {
 }
 
 // createPage is the internal method that creates a new page from XML content.
-func (v *VisioFile) createPage(pageContentXML string, pageName string, pageElem *etree.Element, index int, sourcePage *Page) *Page {
+func (v *VisioFile) createPage(pageContentXML string, pageName string, pageElem *etree.Element, index int, sourcePage *Page) (*Page, error) {
 	// Parse page content XML
 	pageDoc := etree.NewDocument()
-	pageDoc.ReadFromString(pageContentXML)
+	if err := pageDoc.ReadFromString(pageContentXML); err != nil {
+		return nil, fmt.Errorf("parsing page XML for %q: %w", pageName, err)
+	}
 
 	newPageFilename := fmt.Sprintf("page%d.xml", len(v.Pages)+1)
 	newPagePath := "visio/pages/" + newPageFilename
@@ -732,7 +754,7 @@ func (v *VisioFile) createPage(pageContentXML string, pageName string, pageElem 
 		v.Pages[index] = newPage
 	}
 
-	return newPage
+	return newPage, nil
 }
 
 // --- Connector creation ---
@@ -762,12 +784,12 @@ func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape
 	v.ensureMasterPages(page, media, connShape)
 
 	// Update BegTrigger and EndTrigger formulas to reference the from/to shapes
-	if cell, ok := connShape.Cells["BegTrigger"]; ok {
+	if cell, ok := connShape.Cells[CellBegTrigger]; ok {
 		formula := cell.Formula()
 		formula = strings.Replace(formula, "Sheet.1!", "Sheet."+fromShape.ID+"!", 1)
 		cell.SetFormula(formula)
 	}
-	if cell, ok := connShape.Cells["EndTrigger"]; ok {
+	if cell, ok := connShape.Cells[CellEndTrigger]; ok {
 		formula := cell.Formula()
 		formula = strings.Replace(formula, "Sheet.2!", "Sheet."+toShape.ID+"!", 1)
 		cell.SetFormula(formula)
@@ -776,19 +798,19 @@ func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape
 	// Create Connect XML elements linking the connector to the shapes
 	endConnectElem := etree.NewElement("Connect")
 	endConnectElem.CreateAttr("FromSheet", connShape.ID)
-	endConnectElem.CreateAttr("FromCell", "EndX")
-	endConnectElem.CreateAttr("FromPart", "12")
+	endConnectElem.CreateAttr("FromCell", ConnCellEndX)
+	endConnectElem.CreateAttr("FromPart", PartEndX)
 	endConnectElem.CreateAttr("ToSheet", toShape.ID)
-	endConnectElem.CreateAttr("ToCell", "PinX")
-	endConnectElem.CreateAttr("ToPart", "3")
+	endConnectElem.CreateAttr("ToCell", ConnCellPinX)
+	endConnectElem.CreateAttr("ToPart", PartWholeShape)
 
 	begConnectElem := etree.NewElement("Connect")
 	begConnectElem.CreateAttr("FromSheet", connShape.ID)
-	begConnectElem.CreateAttr("FromCell", "BeginX")
-	begConnectElem.CreateAttr("FromPart", "9")
+	begConnectElem.CreateAttr("FromCell", ConnCellBeginX)
+	begConnectElem.CreateAttr("FromPart", PartBeginX)
 	begConnectElem.CreateAttr("ToSheet", fromShape.ID)
-	begConnectElem.CreateAttr("ToCell", "PinX")
-	begConnectElem.CreateAttr("ToPart", "3")
+	begConnectElem.CreateAttr("ToCell", ConnCellPinX)
+	begConnectElem.CreateAttr("ToPart", PartWholeShape)
 
 	page.AddConnect(newConnect(endConnectElem, page))
 	page.AddConnect(newConnect(begConnectElem, page))
@@ -1078,19 +1100,31 @@ func (v *VisioFile) SaveVsdx(filename string) error {
 
 	// Update other XML files
 	if v.contentTypesXML != nil {
-		data, _ := v.contentTypesXML.WriteToBytes()
+		data, err := v.contentTypesXML.WriteToBytes()
+		if err != nil {
+			return fmt.Errorf("serializing [Content_Types].xml: %w", err)
+		}
 		v.ZipFileContents["[Content_Types].xml"] = data
 	}
 	if v.appXML != nil {
-		data, _ := v.appXML.WriteToBytes()
+		data, err := v.appXML.WriteToBytes()
+		if err != nil {
+			return fmt.Errorf("serializing app.xml: %w", err)
+		}
 		v.ZipFileContents["docProps/app.xml"] = data
 	}
 	if v.documentXML != nil {
-		data, _ := v.documentXML.WriteToBytes()
+		data, err := v.documentXML.WriteToBytes()
+		if err != nil {
+			return fmt.Errorf("serializing document.xml: %w", err)
+		}
 		v.ZipFileContents["visio/document.xml"] = data
 	}
 	if v.documentXMLRels != nil {
-		data, _ := v.documentXMLRels.WriteToBytes()
+		data, err := v.documentXMLRels.WriteToBytes()
+		if err != nil {
+			return fmt.Errorf("serializing document.xml.rels: %w", err)
+		}
 		v.ZipFileContents["visio/_rels/document.xml.rels"] = data
 	}
 

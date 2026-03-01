@@ -22,8 +22,8 @@ func NewMedia() (*Media, error) {
 }
 
 // Close releases resources.
-func (m *Media) Close() {
-	m.vis.Close()
+func (m *Media) Close() error {
+	return m.vis.Close()
 }
 
 // StraightConnector returns the straight connector template shape.

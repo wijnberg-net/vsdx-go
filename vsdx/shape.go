@@ -9,6 +9,11 @@ import (
 	"github.com/beevik/etree"
 )
 
+// fmtFloat formats a float64 as a string with no trailing zeros.
+func fmtFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
 // toFloat converts a string to float64. Returns 0.0 if empty or invalid.
 func toFloat(val string) float64 {
 	if val == "" {
@@ -36,10 +41,15 @@ func collectText(e *etree.Element) string {
 	return buf.String()
 }
 
+// ShapeParent is the interface implemented by types that can contain shapes (*Page or *Shape).
+type ShapeParent interface {
+	removeChildShape(s *Shape)
+}
+
 // Shape represents a single shape or a group shape containing other shapes.
 type Shape struct {
 	xml           *etree.Element
-	Parent        interface{} // *Page or *Shape
+	Parent        ShapeParent // *Page or *Shape
 	Page          *Page
 	ID            string
 	MasterShapeID string // MasterShape attribute
@@ -53,7 +63,7 @@ type Shape struct {
 }
 
 // newShape creates a Shape from an XML element.
-func newShape(xml *etree.Element, parent interface{}, page *Page) *Shape {
+func newShape(xml *etree.Element, parent ShapeParent, page *Page) *Shape {
 	s := &Shape{
 		xml:           xml,
 		Parent:        parent,
@@ -72,8 +82,8 @@ func newShape(xml *etree.Element, parent interface{}, page *Page) *Shape {
 
 	// Inherit MasterPageID from parent shape if not set (for sub-shapes in groups)
 	if s.MasterPageID == "" {
-		if parentShape, ok := parent.(*Shape); ok {
-			s.MasterPageID = parentShape.MasterPageID
+		if ps := s.ParentShape(); ps != nil {
+			s.MasterPageID = ps.MasterPageID
 		}
 	}
 
@@ -196,12 +206,11 @@ func (s *Shape) HasCell(name string) bool {
 
 // --- Cell editing ---
 
-// SetCellValue sets the value of a named cell, creating it if it doesn't exist.
-// If a master shape has the cell, the new cell is copied from the master.
-func (s *Shape) SetCellValue(name, value string) {
+// ensureCell returns the cell with the given name, creating it if it doesn't exist.
+// skipAttr is the attribute key to exclude when copying from a master cell (e.g., "V" or "F").
+func (s *Shape) ensureCell(name, skipAttr string) *Cell {
 	if cell, ok := s.Cells[name]; ok {
-		cell.SetValue(value)
-		return
+		return cell
 	}
 	// Create new cell element
 	cellElem := etree.NewElement("Cell")
@@ -212,7 +221,7 @@ func (s *Shape) SetCellValue(name, value string) {
 		if ms := s.MasterShape(); ms != nil {
 			if masterCell, ok := ms.Cells[name]; ok {
 				for _, attr := range masterCell.xml.Attr {
-					if attr.Key != "V" { // don't copy value from master
+					if attr.Key != skipAttr {
 						cellElem.CreateAttr(attr.Key, attr.Value)
 					}
 				}
@@ -230,45 +239,19 @@ func (s *Shape) SetCellValue(name, value string) {
 	}
 
 	cell := newCell(cellElem, s)
-	cell.SetValue(value)
 	s.Cells[name] = cell
+	return cell
+}
+
+// SetCellValue sets the value of a named cell, creating it if it doesn't exist.
+// If a master shape has the cell, the new cell is copied from the master.
+func (s *Shape) SetCellValue(name, value string) {
+	s.ensureCell(name, "V").SetValue(value)
 }
 
 // SetCellFormula sets the formula of a named cell, creating it if it doesn't exist.
 func (s *Shape) SetCellFormula(name, formula string) {
-	if cell, ok := s.Cells[name]; ok {
-		cell.SetFormula(formula)
-		return
-	}
-	// Create new cell element
-	cellElem := etree.NewElement("Cell")
-	cellElem.CreateAttr("N", name)
-
-	// Copy attributes from master cell if available
-	if s.MasterPageID != "" {
-		if ms := s.MasterShape(); ms != nil {
-			if masterCell, ok := ms.Cells[name]; ok {
-				for _, attr := range masterCell.xml.Attr {
-					if attr.Key != "F" { // don't copy formula from master
-						cellElem.CreateAttr(attr.Key, attr.Value)
-					}
-				}
-			}
-		}
-	}
-
-	// Insert after last Cell element in shape XML
-	cells := s.xml.SelectElements("Cell")
-	if len(cells) > 0 {
-		lastCell := cells[len(cells)-1]
-		insertAfter(s.xml, lastCell, cellElem)
-	} else {
-		s.xml.InsertChildAt(0, cellElem)
-	}
-
-	cell := newCell(cellElem, s)
-	cell.SetFormula(formula)
-	s.Cells[name] = cell
+	s.ensureCell(name, "F").SetFormula(formula)
 }
 
 // insertAfter inserts newElem after refElem in parent's children.
@@ -280,44 +263,44 @@ func insertAfter(parent, refElem, newElem *etree.Element) {
 
 // --- Position and size properties ---
 
-func (s *Shape) X() float64      { return toFloat(s.CellValue("PinX")) }
-func (s *Shape) Y() float64      { return toFloat(s.CellValue("PinY")) }
-func (s *Shape) LocX() float64   { return toFloat(s.CellValue("LocPinX")) }
-func (s *Shape) LocY() float64   { return toFloat(s.CellValue("LocPinY")) }
-func (s *Shape) Width() float64  { return toFloat(s.CellValue("Width")) }
-func (s *Shape) Height() float64 { return toFloat(s.CellValue("Height")) }
-func (s *Shape) Angle() float64  { return toFloat(s.CellValue("Angle")) }
+func (s *Shape) X() float64      { return toFloat(s.CellValue(CellPinX)) }
+func (s *Shape) Y() float64      { return toFloat(s.CellValue(CellPinY)) }
+func (s *Shape) LocX() float64   { return toFloat(s.CellValue(CellLocPinX)) }
+func (s *Shape) LocY() float64   { return toFloat(s.CellValue(CellLocPinY)) }
+func (s *Shape) Width() float64  { return toFloat(s.CellValue(CellWidth)) }
+func (s *Shape) Height() float64 { return toFloat(s.CellValue(CellHeight)) }
+func (s *Shape) Angle() float64  { return toFloat(s.CellValue(CellAngle)) }
 
-func (s *Shape) BeginX() float64 { return toFloat(s.CellValue("BeginX")) }
-func (s *Shape) BeginY() float64 { return toFloat(s.CellValue("BeginY")) }
-func (s *Shape) EndX() float64   { return toFloat(s.CellValue("EndX")) }
-func (s *Shape) EndY() float64   { return toFloat(s.CellValue("EndY")) }
+func (s *Shape) BeginX() float64 { return toFloat(s.CellValue(CellBeginX)) }
+func (s *Shape) BeginY() float64 { return toFloat(s.CellValue(CellBeginY)) }
+func (s *Shape) EndX() float64   { return toFloat(s.CellValue(CellEndX)) }
+func (s *Shape) EndY() float64   { return toFloat(s.CellValue(CellEndY)) }
 
-func (s *Shape) HasBeginX() bool { return s.CellValue("BeginX") != "" }
+func (s *Shape) HasBeginX() bool { return s.CellValue(CellBeginX) != "" }
 
-func (s *Shape) LocXFormula() string { return s.CellFormula("LocPinX") }
-func (s *Shape) LocYFormula() string { return s.CellFormula("LocPinY") }
+func (s *Shape) LocXFormula() string { return s.CellFormula(CellLocPinX) }
+func (s *Shape) LocYFormula() string { return s.CellFormula(CellLocPinY) }
 
 // --- Position and size setters ---
 
-func (s *Shape) SetX(v float64)      { s.SetCellValue("PinX", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetY(v float64)      { s.SetCellValue("PinY", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetLocX(v float64)   { s.SetCellValue("LocPinX", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetLocY(v float64)   { s.SetCellValue("LocPinY", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetWidth(v float64)  { s.SetCellValue("Width", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetHeight(v float64) { s.SetCellValue("Height", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetAngle(v float64)  { s.SetCellValue("Angle", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetX(v float64)      { s.SetCellValue(CellPinX, fmtFloat(v)) }
+func (s *Shape) SetY(v float64)      { s.SetCellValue(CellPinY, fmtFloat(v)) }
+func (s *Shape) SetLocX(v float64)   { s.SetCellValue(CellLocPinX, fmtFloat(v)) }
+func (s *Shape) SetLocY(v float64)   { s.SetCellValue(CellLocPinY, fmtFloat(v)) }
+func (s *Shape) SetWidth(v float64)  { s.SetCellValue(CellWidth, fmtFloat(v)) }
+func (s *Shape) SetHeight(v float64) { s.SetCellValue(CellHeight, fmtFloat(v)) }
+func (s *Shape) SetAngle(v float64)  { s.SetCellValue(CellAngle, fmtFloat(v)) }
 
-func (s *Shape) SetBeginX(v float64) { s.SetCellValue("BeginX", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetBeginY(v float64) { s.SetCellValue("BeginY", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetEndX(v float64)   { s.SetCellValue("EndX", strconv.FormatFloat(v, 'f', -1, 64)) }
-func (s *Shape) SetEndY(v float64)   { s.SetCellValue("EndY", strconv.FormatFloat(v, 'f', -1, 64)) }
+func (s *Shape) SetBeginX(v float64) { s.SetCellValue(CellBeginX, fmtFloat(v)) }
+func (s *Shape) SetBeginY(v float64) { s.SetCellValue(CellBeginY, fmtFloat(v)) }
+func (s *Shape) SetEndX(v float64)   { s.SetCellValue(CellEndX, fmtFloat(v)) }
+func (s *Shape) SetEndY(v float64)   { s.SetCellValue(CellEndY, fmtFloat(v)) }
 
 // --- Style properties ---
 
-func (s *Shape) LineWeight() float64 { return toFloat(s.CellValue("LineWeight")) }
-func (s *Shape) LineColor() string   { return s.CellValue("LineColor") }
-func (s *Shape) FillColor() string   { return s.CellValue("FillForegnd") }
+func (s *Shape) LineWeight() float64 { return toFloat(s.CellValue(CellLineWeight)) }
+func (s *Shape) LineColor() string   { return s.CellValue(CellLineColor) }
+func (s *Shape) FillColor() string   { return s.CellValue(CellFillForegnd) }
 
 // TextColor returns the first text color from the Character section.
 func (s *Shape) TextColor() string {
@@ -333,7 +316,7 @@ func (s *Shape) TextColor() string {
 }
 
 // EndArrow returns the EndArrow cell value.
-func (s *Shape) EndArrow() string { return s.CellValue("EndArrow") }
+func (s *Shape) EndArrow() string { return s.CellValue(CellEndArrow) }
 
 // LineStyleID returns the LineStyle attribute.
 func (s *Shape) LineStyleID() string { return s.xml.SelectAttrValue("LineStyle", "") }
@@ -347,10 +330,10 @@ func (s *Shape) TextStyleID() string { return s.xml.SelectAttrValue("TextStyle",
 // --- Style setters ---
 
 func (s *Shape) SetLineWeight(v float64) {
-	s.SetCellValue("LineWeight", strconv.FormatFloat(v, 'f', -1, 64))
+	s.SetCellValue(CellLineWeight, fmtFloat(v))
 }
-func (s *Shape) SetLineColor(v string)   { s.SetCellValue("LineColor", v) }
-func (s *Shape) SetFillColor(v string)   { s.SetCellValue("FillForegnd", v) }
+func (s *Shape) SetLineColor(v string)   { s.SetCellValue(CellLineColor, v) }
+func (s *Shape) SetFillColor(v string)   { s.SetCellValue(CellFillForegnd, v) }
 
 // SetTextColor sets the first text color in the Character section.
 func (s *Shape) SetTextColor(v string) {
@@ -366,7 +349,7 @@ func (s *Shape) SetTextColor(v string) {
 
 // SetEndArrow sets the EndArrow cell value. Use 13 for standard arrow, 0 for none.
 func (s *Shape) SetEndArrow(v int) {
-	s.SetCellValue("EndArrow", strconv.Itoa(v))
+	s.SetCellValue(CellEndArrow, strconv.Itoa(v))
 }
 
 // SetLineStyleID sets the LineStyle attribute on the shape element.
@@ -429,17 +412,12 @@ func (s *Shape) Move(xDelta, yDelta float64) {
 
 // Remove removes this shape from its parent XML element.
 func (s *Shape) Remove() {
-	switch p := s.Parent.(type) {
-	case *Shape:
-		p.xml.RemoveChild(s.xml)
-	case *Page:
-		if p.xml != nil && p.xml.Root() != nil {
-			// Remove from Shapes container
-			for _, shapesElem := range p.xml.Root().SelectElements("Shapes") {
-				shapesElem.RemoveChild(s.xml)
-			}
-		}
-	}
+	s.Parent.removeChildShape(s)
+}
+
+// removeChildShape removes a child shape from this group shape's XML.
+func (s *Shape) removeChildShape(child *Shape) {
+	s.xml.RemoveChild(child.xml)
 }
 
 // FindReplace finds and replaces text in this shape and all sub-shapes.
@@ -495,16 +473,16 @@ func (s *Shape) SetStartAndFinish(startX, startY, finishX, finishY float64) {
 	}
 
 	// Update text pin positions
-	txtPinX := s.Cells["TxtPinX"]
-	txtPinY := s.Cells["TxtPinY"]
+	txtPinX := s.Cells[CellTxtPinX]
+	txtPinY := s.Cells[CellTxtPinY]
 	if txtPinX != nil && txtPinY != nil {
 		if isConnector {
-			txtPinX.SetValue(strconv.FormatFloat(width/2, 'f', -1, 64))
-			txtPinY.SetValue(strconv.FormatFloat((finishY-startY)/2, 'f', -1, 64))
+			txtPinX.SetValue(fmtFloat(width / 2))
+			txtPinY.SetValue(fmtFloat((finishY - startY) / 2))
 		} else {
 			cx, cy := s.CenterXY()
-			txtPinX.SetValue(strconv.FormatFloat(cx, 'f', -1, 64))
-			txtPinY.SetValue(strconv.FormatFloat(cy, 'f', -1, 64))
+			txtPinX.SetValue(fmtFloat(cx))
+			txtPinY.SetValue(fmtFloat(cy))
 		}
 		pinXStr := txtPinX.Value()
 		pinYStr := txtPinY.Value()
@@ -541,7 +519,7 @@ func (s *Shape) SetStartAndFinish(startX, startY, finishX, finishY float64) {
 				}
 			}
 			if v, ok := CalcValue(s, formula); ok {
-				elem.CreateAttr("V", strconv.FormatFloat(v, 'f', -1, 64))
+				elem.CreateAttr("V", fmtFloat(v))
 			}
 		}
 	}
@@ -558,6 +536,14 @@ func (s *Shape) RelativeBounds() (float64, float64, float64, float64) {
 		ey += pby
 	}
 	return bx, by, ex, ey
+}
+
+// ParentShape returns the parent as a *Shape, or nil if the parent is a Page.
+func (s *Shape) ParentShape() *Shape {
+	if ps, ok := s.Parent.(*Shape); ok {
+		return ps
+	}
+	return nil
 }
 
 // --- Child shapes ---
@@ -771,7 +757,7 @@ func (s *Shape) DataProperties() map[string]*DataProperty {
 
 // Bounds returns the absolute bounds (beginX, beginY, endX, endY) of the shape relative to the page.
 func (s *Shape) Bounds() (float64, float64, float64, float64) {
-	if !s.HasBeginX() && !s.HasCell("PinX") && !s.HasCell("LocPinX") {
+	if !s.HasBeginX() && !s.HasCell(CellPinX) && !s.HasCell(CellLocPinX) {
 		return 0, 0, 0, 0
 	}
 	bx := s.BeginX()
@@ -799,6 +785,24 @@ func (s *Shape) CenterXY() (float64, float64) {
 		return s.BeginX() + s.Width()/2, s.BeginY() + s.Height()/2
 	}
 	return s.X(), s.Y()
+}
+
+// Center returns the center position of the shape as a Point.
+func (s *Shape) Center() Point {
+	x, y := s.CenterXY()
+	return Point{X: x, Y: y}
+}
+
+// BoundsRect returns the absolute bounds of the shape as a Rect.
+func (s *Shape) BoundsRect() Rect {
+	bx, by, ex, ey := s.Bounds()
+	return Rect{BeginX: bx, BeginY: by, EndX: ex, EndY: ey}
+}
+
+// RelativeBoundsRect returns bounds relative to parent group shape as a Rect.
+func (s *Shape) RelativeBoundsRect() Rect {
+	bx, by, ex, ey := s.RelativeBounds()
+	return Rect{BeginX: bx, BeginY: by, EndX: ex, EndY: ey}
 }
 
 // --- Connects ---

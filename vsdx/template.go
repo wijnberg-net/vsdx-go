@@ -26,8 +26,8 @@ var (
 // Supported directives in page names:
 //   - {% showif condition %} - Conditionally show/hide page
 //
-// Context values can be string, int, float64, bool, or []interface{} (for loops).
-func (v *VisioFile) RenderTemplate(context map[string]interface{}) {
+// Context values can be string, int, float64, bool, or []any (for loops).
+func (v *VisioFile) RenderTemplate(context map[string]any) {
 	// Process pages in reverse order so removal indices stay valid
 	pagesToRemove := []int{}
 
@@ -55,7 +55,7 @@ func (v *VisioFile) RenderTemplate(context map[string]interface{}) {
 
 // renderPageShowIf checks if a page name contains {% showif %} and evaluates it.
 // Returns true if page should be kept, false if it should be removed.
-func (v *VisioFile) renderPageShowIf(page *Page, context map[string]interface{}) bool {
+func (v *VisioFile) renderPageShowIf(page *Page, context map[string]any) bool {
 	name := page.Name()
 	matches := reShowIf.FindStringSubmatch(name)
 	if matches == nil {
@@ -76,7 +76,7 @@ func (v *VisioFile) renderPageShowIf(page *Page, context map[string]interface{})
 }
 
 // renderShapeSetSelfs processes {% set self.prop = value %} directives in shapes.
-func (v *VisioFile) renderShapeSetSelfs(shape *Shape, context map[string]interface{}) {
+func (v *VisioFile) renderShapeSetSelfs(shape *Shape, context map[string]any) {
 	for _, child := range shape.ChildShapes() {
 		v.renderShapeSetSelfs(child, context)
 	}
@@ -92,7 +92,7 @@ func (v *VisioFile) renderShapeSetSelfs(shape *Shape, context map[string]interfa
 		valueExpr := match[2]
 
 		// Create extended context with self references
-		extContext := make(map[string]interface{})
+		extContext := make(map[string]any)
 		for k, v := range context {
 			extContext[k] = v
 		}
@@ -121,7 +121,7 @@ func (v *VisioFile) renderShapeSetSelfs(shape *Shape, context map[string]interfa
 }
 
 // renderShapeForLoops processes {% for item in list %} directives.
-func (v *VisioFile) renderShapeForLoops(shape *Shape, page *Page, context map[string]interface{}) {
+func (v *VisioFile) renderShapeForLoops(shape *Shape, page *Page, context map[string]any) {
 	children := shape.ChildShapes()
 	for _, child := range children {
 		v.renderShapeForLoops(child, page, context)
@@ -155,7 +155,7 @@ func (v *VisioFile) renderShapeForLoops(shape *Shape, page *Page, context map[st
 	templateXML := shape.XML().Copy()
 
 	// First item uses the original shape
-	itemContext := mergeContext(context, map[string]interface{}{itemVar: items[0]})
+	itemContext := mergeContext(context, map[string]any{itemVar: items[0]})
 	applyTextContext(shape, itemContext)
 
 	// Process showifs on child shapes of the original
@@ -171,7 +171,7 @@ func (v *VisioFile) renderShapeForLoops(shape *Shape, page *Page, context map[st
 		newShape := newShape(newShapeElem, shape.Parent, page)
 
 		// Apply item context
-		loopContext := mergeContext(context, map[string]interface{}{itemVar: item})
+		loopContext := mergeContext(context, map[string]any{itemVar: item})
 		applyTextContext(newShape, loopContext)
 
 		// Process showifs on children of the copy
@@ -184,7 +184,7 @@ func (v *VisioFile) renderShapeForLoops(shape *Shape, page *Page, context map[st
 }
 
 // renderShapeShowIfs processes {% showif condition %} directives on shapes.
-func (v *VisioFile) renderShapeShowIfs(shape *Shape, context map[string]interface{}) {
+func (v *VisioFile) renderShapeShowIfs(shape *Shape, context map[string]any) {
 	// Process children first (in reverse to handle removals)
 	children := shape.ChildShapes()
 	for i := len(children) - 1; i >= 0; i-- {
@@ -207,7 +207,7 @@ func (v *VisioFile) renderShapeShowIfs(shape *Shape, context map[string]interfac
 }
 
 // renderShapeText replaces {{key}} placeholders in shape text.
-func (v *VisioFile) renderShapeText(shape *Shape, context map[string]interface{}) {
+func (v *VisioFile) renderShapeText(shape *Shape, context map[string]any) {
 	for _, child := range shape.ChildShapes() {
 		v.renderShapeText(child, context)
 	}
@@ -235,7 +235,7 @@ func (v *VisioFile) renderShapeText(shape *Shape, context map[string]interface{}
 
 // evaluateCondition evaluates a condition string to a boolean.
 // Supports: variable truthiness, "not var", "var > num", "var < num", "var == num"
-func evaluateCondition(expr string, context map[string]interface{}) bool {
+func evaluateCondition(expr string, context map[string]any) bool {
 	expr = strings.TrimSpace(expr)
 
 	// Handle "not variable"
@@ -278,7 +278,7 @@ func evaluateCondition(expr string, context map[string]interface{}) bool {
 
 // evaluateNumericExpression evaluates a numeric expression.
 // Supports: numbers, variables, "a*b", "a+b", "a-b", "a/b", "a if b else c"
-func evaluateNumericExpression(expr string, context map[string]interface{}) float64 {
+func evaluateNumericExpression(expr string, context map[string]any) float64 {
 	expr = strings.TrimSpace(expr)
 
 	// Handle ternary: "value_if_true if condition else value_if_false"
@@ -331,7 +331,7 @@ func evaluateNumericExpression(expr string, context map[string]interface{}) floa
 }
 
 // evaluateTextExpression evaluates a text expression for {{}} replacement.
-func evaluateTextExpression(expr string, context map[string]interface{}) string {
+func evaluateTextExpression(expr string, context map[string]any) string {
 	expr = strings.TrimSpace(expr)
 
 	// Try as arithmetic expression first (e.g., "x*y")
@@ -355,7 +355,7 @@ func evaluateTextExpression(expr string, context map[string]interface{}) string 
 }
 
 // resolveNumeric resolves a string to a float64 (either a literal or context variable).
-func resolveNumeric(s string, context map[string]interface{}) float64 {
+func resolveNumeric(s string, context map[string]any) float64 {
 	s = strings.TrimSpace(s)
 
 	// Try as literal number
@@ -387,7 +387,7 @@ func findOperator(expr, op string) int {
 }
 
 // isTruthy returns whether a value is truthy (non-zero, non-empty, non-false).
-func isTruthy(val interface{}) bool {
+func isTruthy(val any) bool {
 	switch v := val.(type) {
 	case bool:
 		return v
@@ -397,7 +397,7 @@ func isTruthy(val interface{}) bool {
 		return v != 0
 	case string:
 		return v != "" && v != "0" && v != "false" && v != "False"
-	case []interface{}:
+	case []any:
 		return len(v) > 0
 	case []string:
 		return len(v) > 0
@@ -410,8 +410,8 @@ func isTruthy(val interface{}) bool {
 	}
 }
 
-// toInterfaceFloat converts an interface{} value to float64.
-func toInterfaceFloat(val interface{}) float64 {
+// toInterfaceFloat converts an any value to float64.
+func toInterfaceFloat(val any) float64 {
 	switch v := val.(type) {
 	case float64:
 		return v
@@ -429,25 +429,25 @@ func toInterfaceFloat(val interface{}) float64 {
 	return 0
 }
 
-// toSlice converts a context value to a []interface{} slice.
-func toSlice(val interface{}) []interface{} {
+// toSlice converts a context value to a []any slice.
+func toSlice(val any) []any {
 	switch v := val.(type) {
-	case []interface{}:
+	case []any:
 		return v
 	case []string:
-		result := make([]interface{}, len(v))
+		result := make([]any, len(v))
 		for i, s := range v {
 			result[i] = s
 		}
 		return result
 	case []int:
-		result := make([]interface{}, len(v))
+		result := make([]any, len(v))
 		for i, n := range v {
 			result[i] = n
 		}
 		return result
 	case []float64:
-		result := make([]interface{}, len(v))
+		result := make([]any, len(v))
 		for i, f := range v {
 			result[i] = f
 		}
@@ -457,8 +457,8 @@ func toSlice(val interface{}) []interface{} {
 }
 
 // mergeContext creates a new context with additional values merged in.
-func mergeContext(base, extra map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func mergeContext(base, extra map[string]any) map[string]any {
+	result := make(map[string]any)
 	for k, v := range base {
 		result[k] = v
 	}
@@ -469,7 +469,7 @@ func mergeContext(base, extra map[string]interface{}) map[string]interface{} {
 }
 
 // applyTextContext replaces {{key}} placeholders in a shape and its children.
-func applyTextContext(shape *Shape, context map[string]interface{}) {
+func applyTextContext(shape *Shape, context map[string]any) {
 	text := shape.Text()
 	if strings.Contains(text, "{{") {
 		newText := rePlaceholder.ReplaceAllStringFunc(text, func(match string) string {
