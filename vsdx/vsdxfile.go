@@ -6,9 +6,20 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/beevik/etree"
+)
+
+// PagePosition represents a relative position for inserting pages.
+type PagePosition int
+
+const (
+	PageFirst  PagePosition = 0
+	PageLast   PagePosition = -1
+	PageAfter  PagePosition = -2
+	PageBefore PagePosition = -3
 )
 
 // VisioFile represents an open .vsdx file.
@@ -50,6 +61,42 @@ func Open(filename string) (*VisioFile, error) {
 		return nil, fmt.Errorf("loading pages: %w", err)
 	}
 
+	v.loadMasterPages()
+
+	return v, nil
+}
+
+// OpenBytes opens a .vsdx file from a byte slice (e.g. embedded data).
+func OpenBytes(data []byte) (*VisioFile, error) {
+	v := &VisioFile{
+		Filename:        "(bytes)",
+		ZipFileContents: make(map[string][]byte),
+		masterIndex:     make(map[string]*Page),
+	}
+
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("opening zip from bytes: %w", err)
+	}
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("opening %s: %w", f.Name, err)
+		}
+		content, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", f.Name, err)
+		}
+		v.ZipFileContents[f.Name] = content
+	}
+
+	if err := v.loadPages(); err != nil {
+		return nil, fmt.Errorf("loading pages: %w", err)
+	}
 	v.loadMasterPages()
 
 	return v, nil
@@ -294,6 +341,709 @@ func PrettyPrintElement(elem *etree.Element) string {
 	doc.Indent(2)
 	s, _ := doc.WriteToString()
 	return s
+}
+
+// --- Page management ---
+
+// RemovePageByIndex removes the page at the given zero-based index.
+func (v *VisioFile) RemovePageByIndex(index int) {
+	if index < 0 || index >= len(v.Pages) {
+		return
+	}
+	// Remove Page element from pages.xml
+	pageElems := v.pagesXML.Root().SelectElements("Page")
+	if index < len(pageElems) {
+		v.pagesXML.Root().RemoveChild(pageElems[index])
+	}
+
+	page := v.Pages[index]
+
+	// Remove from app.xml
+	v.removePageFromAppXML(page.Name())
+
+	// Remove page XML from zip contents
+	delete(v.ZipFileContents, page.filename)
+
+	// Remove from pages slice
+	v.Pages = append(v.Pages[:index], v.Pages[index+1:]...)
+}
+
+// RemovePageByName removes the first page matching the given name.
+func (v *VisioFile) RemovePageByName(name string) {
+	for i, p := range v.Pages {
+		if p.Name() == name {
+			v.RemovePageByIndex(i)
+			return
+		}
+	}
+}
+
+// AddPage adds a new empty page at the end of the VisioFile.
+func (v *VisioFile) AddPage(name string) *Page {
+	return v.AddPageAt(int(PageLast), name)
+}
+
+// AddPageAt adds a new empty page at the specified index (or PagePosition).
+func (v *VisioFile) AddPageAt(index int, name string) *Page {
+	// Determine page name
+	if name == "" {
+		name = fmt.Sprintf("Page-%d", len(v.Pages)+1)
+	}
+	name = v.getNewPageName(name)
+
+	// Determine filename
+	newPageFilename := fmt.Sprintf("page%d.xml", len(v.Pages)+1)
+
+	// Add to pages.xml.rels
+	newRelID := v.updatePagesXMLRels(newPageFilename)
+
+	// Create PageSheet element with default values
+	pagesheetElem := etree.NewElement("PageSheet")
+	pagesheetElem.CreateAttr("FillStyle", "0")
+	pagesheetElem.CreateAttr("LineStyle", "0")
+	pagesheetElem.CreateAttr("TextStyle", "0")
+
+	defaultCells := []struct{ name, value string }{
+		{"PageWidth", "8.26771653543307"},
+		{"PageHeight", "11.69291338582677"},
+		{"ShdwOffsetX", "0.1181102362204724"},
+		{"ShdwOffsetY", "-0.1181102362204724"},
+		{"DrawingSizeType", "0"},
+		{"DrawingScaleType", "0"},
+		{"InhibitSnap", "0"},
+		{"UIVisibility", "0"},
+		{"ShdwType", "0"},
+		{"ShdwObliqueAngle", "0"},
+		{"ShdwScaleFactor", "1"},
+		{"DrawingResizeType", "1"},
+		{"PageShapeSplit", "1"},
+	}
+	for _, c := range defaultCells {
+		cell := pagesheetElem.CreateElement("Cell")
+		cell.CreateAttr("N", c.name)
+		cell.CreateAttr("V", c.value)
+	}
+
+	// Create Page element for pages.xml
+	newPageID := v.getMaxPageID() + 1
+	pageElem := etree.NewElement("Page")
+	pageElem.CreateAttr("ID", strconv.Itoa(newPageID))
+	pageElem.CreateAttr("NameU", name)
+	pageElem.CreateAttr("Name", name)
+	pageElem.AddChild(pagesheetElem)
+
+	relElem := pageElem.CreateElement("Rel")
+	relElem.CreateAttr("r:id", newRelID)
+
+	// Create empty page content XML
+	pageContentXML := fmt.Sprintf("<?xml version='1.0' encoding='utf-8' ?><PageContents xmlns='%s' xmlns:r='%s' xml:space='preserve'/>", MainNS, RelNS)
+
+	return v.createPage(pageContentXML, name, pageElem, index, nil)
+}
+
+// CopyPage copies an existing page and inserts at the given index (or PagePosition).
+func (v *VisioFile) CopyPage(page *Page, index int, name string) *Page {
+	if name == "" {
+		name = page.Name()
+	}
+	name = v.getNewPageName(name)
+
+	newPageFilename := fmt.Sprintf("page%d.xml", len(v.Pages)+1)
+	newRelID := v.updatePagesXMLRels(newPageFilename)
+
+	// Copy the source page element from pages.xml
+	var sourcePageElem *etree.Element
+	for _, pe := range v.pagesXML.Root().SelectElements("Page") {
+		if pe.SelectAttrValue("Name", "") == page.Name() {
+			sourcePageElem = pe
+			break
+		}
+	}
+	if sourcePageElem == nil {
+		return nil
+	}
+
+	// Deep copy the page element
+	newPageElem := sourcePageElem.Copy()
+	newPageElem.CreateAttr("ID", strconv.Itoa(v.getMaxPageID()+1))
+	newPageElem.CreateAttr("NameU", name)
+	newPageElem.CreateAttr("Name", name)
+
+	// Update Rel element with new relID
+	relElem := newPageElem.SelectElement("Rel")
+	if relElem != nil {
+		relElem.CreateAttr("r:id", newRelID)
+	}
+
+	// Serialize source page content XML
+	pageContentBytes, _ := page.xml.WriteToBytes()
+	pageContentXML := string(pageContentBytes)
+
+	newPage := v.createPage(pageContentXML, name, newPageElem, index, page)
+
+	// Copy page rels if they exist
+	origFilename := filepath.Base(page.filename)
+	pageRelsPath := "visio/pages/_rels/" + origFilename + ".rels"
+	if relsData, ok := v.ZipFileContents[pageRelsPath]; ok {
+		newPageRelsPath := "visio/pages/_rels/" + newPageFilename + ".rels"
+		relsDataCopy := make([]byte, len(relsData))
+		copy(relsDataCopy, relsData)
+		v.ZipFileContents[newPageRelsPath] = relsDataCopy
+	}
+
+	return newPage
+}
+
+// CopyShape copies a shape element into the destination page, assigning new IDs.
+// Returns the new shape element.
+func (v *VisioFile) CopyShape(shape *etree.Element, page *Page) *etree.Element {
+	newShape := shape.Copy()
+	page.SetMaxIDs()
+
+	// Find or create Shapes container
+	shapesTag := page.xml.Root().SelectElement("Shapes")
+	if shapesTag == nil {
+		shapesTag = page.xml.Root().CreateElement("Shapes")
+	}
+
+	idMap := v.incrementShapeIDs(newShape, page, nil)
+	v.updateIDs(newShape, idMap)
+	shapesTag.AddChild(newShape)
+
+	return newShape
+}
+
+// --- Internal page helpers ---
+
+// getNewPageName returns a unique page name by appending -1, -2, etc. if needed.
+func (v *VisioFile) getNewPageName(name string) string {
+	names := v.GetPageNames()
+	nameSet := make(map[string]bool)
+	for _, n := range names {
+		nameSet[n] = true
+	}
+	if !nameSet[name] {
+		return name
+	}
+	i := 1
+	for {
+		candidate := fmt.Sprintf("%s-%d", name, i)
+		if !nameSet[candidate] {
+			return candidate
+		}
+		i++
+	}
+}
+
+// getMaxPageID returns the maximum page ID from pages.xml.
+func (v *VisioFile) getMaxPageID() int {
+	maxID := 0
+	for _, pageElem := range v.pagesXML.Root().SelectElements("Page") {
+		id, err := strconv.Atoi(pageElem.SelectAttrValue("ID", "0"))
+		if err == nil && id > maxID {
+			maxID = id
+		}
+	}
+	return maxID
+}
+
+// updatePagesXMLRels adds a Relationship for the new page and returns the new relID.
+func (v *VisioFile) updatePagesXMLRels(newPageFilename string) string {
+	maxRelID := 0
+	for _, rel := range v.pagesXMLRels.Root().SelectElements("Relationship") {
+		relID := rel.SelectAttrValue("Id", "")
+		if strings.HasPrefix(relID, "rId") {
+			if num, err := strconv.Atoi(relID[3:]); err == nil && num > maxRelID {
+				maxRelID = num
+			}
+		}
+	}
+	newRelID := fmt.Sprintf("rId%d", maxRelID+1)
+
+	rel := v.pagesXMLRels.Root().CreateElement("Relationship")
+	rel.CreateAttr("Target", newPageFilename)
+	rel.CreateAttr("Type", "http://schemas.microsoft.com/visio/2010/relationships/page")
+	rel.CreateAttr("Id", newRelID)
+
+	return newRelID
+}
+
+// resolvePageIndex converts a PagePosition or int index to an actual insert index.
+func (v *VisioFile) resolvePageIndex(index int, sourcePage *Page) int {
+	switch PagePosition(index) {
+	case PageLast:
+		return len(v.Pages)
+	case PageFirst:
+		return 0
+	case PageAfter:
+		if sourcePage != nil {
+			return sourcePage.IndexNum() + 1
+		}
+		return len(v.Pages)
+	case PageBefore:
+		if sourcePage != nil {
+			return sourcePage.IndexNum()
+		}
+		return len(v.Pages)
+	default:
+		if index < 0 {
+			return len(v.Pages)
+		}
+		return index
+	}
+}
+
+// updateContentTypesXML adds an Override entry for the new page.
+func (v *VisioFile) updateContentTypesXML(newPageFilename string) {
+	if v.contentTypesXML == nil {
+		return
+	}
+	root := v.contentTypesXML.Root()
+
+	override := etree.NewElement("Override")
+	override.CreateAttr("PartName", "/visio/pages/"+newPageFilename)
+	override.CreateAttr("ContentType", "application/vnd.ms-visio.page+xml")
+
+	// Find last page Override element and insert after it
+	var lastPageOverride *etree.Element
+	for _, elem := range root.SelectElements("Override") {
+		if elem.SelectAttrValue("ContentType", "") == "application/vnd.ms-visio.page+xml" {
+			lastPageOverride = elem
+		}
+	}
+	if lastPageOverride != nil {
+		insertAfter(root, lastPageOverride, override)
+	} else {
+		root.AddChild(override)
+	}
+}
+
+// addPageToAppXML adds a page entry to app.xml (HeadingPairs and TitlesOfParts).
+func (v *VisioFile) addPageToAppXML(pageName string) {
+	if v.appXML == nil {
+		return
+	}
+	root := v.appXML.Root()
+
+	// Update HeadingPairs: increment page count (first i4 element)
+	headingPairs := root.FindElement("HeadingPairs")
+	if headingPairs != nil {
+		i4 := headingPairs.FindElement(".//i4")
+		if i4 != nil {
+			count, _ := strconv.Atoi(i4.Text())
+			i4.SetText(strconv.Itoa(count + 1))
+		}
+	}
+
+	// Update TitlesOfParts: add new lpstr element
+	titlesOfParts := root.FindElement("TitlesOfParts")
+	if titlesOfParts != nil {
+		vector := titlesOfParts.FindElement(".//vector")
+		if vector != nil {
+			lpstr := vector.CreateElement("lpstr")
+			lpstr.SetText(pageName)
+			// Increment vector size
+			size, _ := strconv.Atoi(vector.SelectAttrValue("size", "0"))
+			vector.CreateAttr("size", strconv.Itoa(size+1))
+		}
+	}
+}
+
+// removePageFromAppXML removes a page entry from app.xml.
+func (v *VisioFile) removePageFromAppXML(pageName string) {
+	if v.appXML == nil {
+		return
+	}
+	root := v.appXML.Root()
+
+	// Update HeadingPairs: decrement page count
+	headingPairs := root.FindElement("HeadingPairs")
+	if headingPairs != nil {
+		i4 := headingPairs.FindElement(".//i4")
+		if i4 != nil {
+			count, _ := strconv.Atoi(i4.Text())
+			if count > 0 {
+				i4.SetText(strconv.Itoa(count - 1))
+			}
+		}
+	}
+
+	// Update TitlesOfParts: remove matching lpstr and decrement vector size
+	titlesOfParts := root.FindElement("TitlesOfParts")
+	if titlesOfParts != nil {
+		vector := titlesOfParts.FindElement(".//vector")
+		if vector != nil {
+			for _, lpstr := range vector.SelectElements("lpstr") {
+				if lpstr.Text() == pageName {
+					vector.RemoveChild(lpstr)
+					break
+				}
+			}
+			size, _ := strconv.Atoi(vector.SelectAttrValue("size", "0"))
+			if size > 0 {
+				vector.CreateAttr("size", strconv.Itoa(size-1))
+			}
+		}
+	}
+}
+
+// createPage is the internal method that creates a new page from XML content.
+func (v *VisioFile) createPage(pageContentXML string, pageName string, pageElem *etree.Element, index int, sourcePage *Page) *Page {
+	// Parse page content XML
+	pageDoc := etree.NewDocument()
+	pageDoc.ReadFromString(pageContentXML)
+
+	newPageFilename := fmt.Sprintf("page%d.xml", len(v.Pages)+1)
+	newPagePath := "visio/pages/" + newPageFilename
+
+	// Resolve index
+	index = v.resolvePageIndex(index, sourcePage)
+
+	// Insert page element in pages.xml at the correct position
+	pageElems := v.pagesXML.Root().SelectElements("Page")
+	if index >= len(pageElems) {
+		v.pagesXML.Root().AddChild(pageElem)
+	} else {
+		// Insert before the element at index
+		targetElem := pageElems[index]
+		targetIndex := targetElem.Index()
+		v.pagesXML.Root().InsertChildAt(targetIndex, pageElem)
+	}
+
+	// Update [Content_Types].xml
+	v.updateContentTypesXML(newPageFilename)
+
+	// Update app.xml
+	v.addPageToAppXML(pageName)
+
+	// Create Page object
+	pageID := pageElem.SelectAttrValue("ID", "")
+	relID := ""
+	if rel := pageElem.SelectElement("Rel"); rel != nil {
+		relID = rel.SelectAttrValue("id", "")
+	}
+	newPage := newPage(pageDoc, newPagePath, pageName, pageID, relID, v)
+
+	// Insert into Pages slice at correct position
+	if index >= len(v.Pages) {
+		v.Pages = append(v.Pages, newPage)
+	} else {
+		v.Pages = append(v.Pages[:index+1], v.Pages[index:]...)
+		v.Pages[index] = newPage
+	}
+
+	return newPage
+}
+
+// --- Connector creation ---
+
+// ConnectShapes creates a new connector shape between fromShape and toShape on the given page.
+// Returns the connector Shape, or an error.
+func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape, error) {
+	media, err := NewMedia()
+	if err != nil {
+		return nil, fmt.Errorf("loading media template: %w", err)
+	}
+	defer media.Close()
+
+	// Copy straight connector template to destination page
+	connectorTemplate := media.StraightConnector()
+	if connectorTemplate == nil {
+		return nil, fmt.Errorf("straight connector not found in media template")
+	}
+
+	connectorElem := v.CopyShape(connectorTemplate.XML(), page)
+
+	// Clear the template text
+	connShape := newShape(connectorElem, page, page)
+	connShape.SetText("")
+
+	// Set up master pages if needed
+	v.ensureMasterPages(page, media, connShape)
+
+	// Update BegTrigger and EndTrigger formulas to reference the from/to shapes
+	if cell, ok := connShape.Cells["BegTrigger"]; ok {
+		formula := cell.Formula()
+		formula = strings.Replace(formula, "Sheet.1!", "Sheet."+fromShape.ID+"!", 1)
+		cell.SetFormula(formula)
+	}
+	if cell, ok := connShape.Cells["EndTrigger"]; ok {
+		formula := cell.Formula()
+		formula = strings.Replace(formula, "Sheet.2!", "Sheet."+toShape.ID+"!", 1)
+		cell.SetFormula(formula)
+	}
+
+	// Create Connect XML elements linking the connector to the shapes
+	endConnectElem := etree.NewElement("Connect")
+	endConnectElem.CreateAttr("FromSheet", connShape.ID)
+	endConnectElem.CreateAttr("FromCell", "EndX")
+	endConnectElem.CreateAttr("FromPart", "12")
+	endConnectElem.CreateAttr("ToSheet", toShape.ID)
+	endConnectElem.CreateAttr("ToCell", "PinX")
+	endConnectElem.CreateAttr("ToPart", "3")
+
+	begConnectElem := etree.NewElement("Connect")
+	begConnectElem.CreateAttr("FromSheet", connShape.ID)
+	begConnectElem.CreateAttr("FromCell", "BeginX")
+	begConnectElem.CreateAttr("FromPart", "9")
+	begConnectElem.CreateAttr("ToSheet", fromShape.ID)
+	begConnectElem.CreateAttr("ToCell", "PinX")
+	begConnectElem.CreateAttr("ToPart", "3")
+
+	page.AddConnect(newConnect(endConnectElem, page))
+	page.AddConnect(newConnect(begConnectElem, page))
+
+	// Position the connector between the shapes
+	fromCX, fromCY := fromShape.CenterXY()
+	toCX, toCY := toShape.CenterXY()
+	connShape.SetStartAndFinish(fromCX, fromCY, toCX, toCY)
+
+	return connShape, nil
+}
+
+// ensureMasterPages sets up master page references for a connector shape.
+func (v *VisioFile) ensureMasterPages(page *Page, media *Media, connShape *Shape) {
+	hasMasters := len(v.MasterPages) > 0
+
+	if !hasMasters {
+		// No masters folder - copy master files from media template
+		mediaVis := media.VisioFile()
+		for path, data := range mediaVis.ZipFileContents {
+			if strings.HasPrefix(path, "visio/masters/") {
+				dataCopy := make([]byte, len(data))
+				copy(dataCopy, data)
+				v.ZipFileContents[path] = dataCopy
+			}
+		}
+		v.loadMasterPages()
+
+		// Add document relationship for masters
+		v.addDocumentRel("http://schemas.microsoft.com/visio/2010/relationships/masters", "masters/masters.xml")
+
+		// Add content types overrides for masters
+		v.addContentTypesOverride("/visio/masters/masters.xml", "application/vnd.ms-visio.masters+xml")
+		v.addContentTypesOverride("/visio/masters/master1.xml", "application/vnd.ms-visio.master+xml")
+
+		// Copy page rels from media template
+		if relsData := media.RelsXML(); relsData != nil {
+			doc := etree.NewDocument()
+			doc.ReadFromBytes(relsData)
+			page.RelsXML = doc
+			page.RelsXMLFile = "visio/pages/_rels/" + filepath.Base(page.filename) + ".rels"
+		}
+	}
+
+	// Update app.xml HeadingPairs and TitlesOfParts for Masters
+	if v.appXML != nil {
+		if v.getAppXMLValue("Masters") == "" {
+			v.setAppXMLValue("Masters", "1")
+		}
+		if !v.titlesOfPartsContains(connShape.ShapeName) {
+			v.addTitlesOfPartsItem(connShape.ShapeName)
+		}
+	}
+}
+
+// addDocumentRel adds a Relationship to document.xml.rels.
+func (v *VisioFile) addDocumentRel(relType, target string) {
+	if v.documentXMLRels == nil {
+		return
+	}
+	root := v.documentXMLRels.Root()
+
+	// Find max rId
+	maxID := 0
+	for _, rel := range root.SelectElements("Relationship") {
+		relID := rel.SelectAttrValue("Id", "")
+		if strings.HasPrefix(relID, "rId") {
+			if num, err := strconv.Atoi(relID[3:]); err == nil && num > maxID {
+				maxID = num
+			}
+		}
+	}
+
+	rel := root.CreateElement("Relationship")
+	rel.CreateAttr("Id", fmt.Sprintf("rId%d", maxID+1))
+	rel.CreateAttr("Type", relType)
+	rel.CreateAttr("Target", target)
+}
+
+// addContentTypesOverride adds an Override entry to [Content_Types].xml.
+func (v *VisioFile) addContentTypesOverride(partName, contentType string) {
+	if v.contentTypesXML == nil {
+		return
+	}
+	root := v.contentTypesXML.Root()
+
+	override := etree.NewElement("Override")
+	override.CreateAttr("PartName", partName)
+	override.CreateAttr("ContentType", contentType)
+
+	// Find last matching Override and insert after it
+	var lastMatch *etree.Element
+	for _, elem := range root.SelectElements("Override") {
+		if elem.SelectAttrValue("ContentType", "") == contentType {
+			lastMatch = elem
+		}
+	}
+	if lastMatch != nil {
+		insertAfter(root, lastMatch, override)
+	} else {
+		root.AddChild(override)
+	}
+}
+
+// getAppXMLValue returns the i4 value for a HeadingPairs entry by name.
+func (v *VisioFile) getAppXMLValue(name string) string {
+	if v.appXML == nil {
+		return ""
+	}
+	headingPairs := v.appXML.Root().FindElement("HeadingPairs")
+	if headingPairs == nil {
+		return ""
+	}
+	variants := headingPairs.FindElements(".//variant")
+	for i := 0; i < len(variants)-1; i++ {
+		lpstr := variants[i].FindElement(".//lpstr")
+		if lpstr != nil && lpstr.Text() == name {
+			i4 := variants[i+1].FindElement(".//i4")
+			if i4 != nil {
+				return i4.Text()
+			}
+		}
+	}
+	return ""
+}
+
+// setAppXMLValue sets the i4 value for a HeadingPairs entry by name (creates if not found).
+func (v *VisioFile) setAppXMLValue(name, value string) {
+	if v.appXML == nil {
+		return
+	}
+	headingPairs := v.appXML.Root().FindElement("HeadingPairs")
+	if headingPairs == nil {
+		return
+	}
+	variants := headingPairs.FindElements(".//variant")
+	for i := 0; i < len(variants)-1; i++ {
+		lpstr := variants[i].FindElement(".//lpstr")
+		if lpstr != nil && lpstr.Text() == name {
+			i4 := variants[i+1].FindElement(".//i4")
+			if i4 != nil {
+				i4.SetText(value)
+				return
+			}
+		}
+	}
+
+	// Not found - create new heading pair
+	vector := headingPairs.FindElement(".//vector")
+	if vector == nil {
+		return
+	}
+
+	nameVariant := vector.CreateElement("variant")
+	lpstr := nameVariant.CreateElement("lpstr")
+	lpstr.SetText(name)
+
+	valueVariant := vector.CreateElement("variant")
+	i4 := valueVariant.CreateElement("i4")
+	i4.SetText(value)
+
+	// Increment vector size by 2
+	size, _ := strconv.Atoi(vector.SelectAttrValue("size", "0"))
+	vector.CreateAttr("size", strconv.Itoa(size+2))
+}
+
+// titlesOfPartsContains checks if a title exists in TitlesOfParts.
+func (v *VisioFile) titlesOfPartsContains(title string) bool {
+	if v.appXML == nil {
+		return false
+	}
+	titlesOfParts := v.appXML.Root().FindElement("TitlesOfParts")
+	if titlesOfParts == nil {
+		return false
+	}
+	vector := titlesOfParts.FindElement(".//vector")
+	if vector == nil {
+		return false
+	}
+	for _, lpstr := range vector.SelectElements("lpstr") {
+		if lpstr.Text() == title {
+			return true
+		}
+	}
+	return false
+}
+
+// addTitlesOfPartsItem adds a title to TitlesOfParts in app.xml.
+func (v *VisioFile) addTitlesOfPartsItem(title string) {
+	if v.appXML == nil {
+		return
+	}
+	titlesOfParts := v.appXML.Root().FindElement("TitlesOfParts")
+	if titlesOfParts == nil {
+		return
+	}
+	vector := titlesOfParts.FindElement(".//vector")
+	if vector == nil {
+		return
+	}
+	lpstr := vector.CreateElement("lpstr")
+	lpstr.SetText(title)
+	size, _ := strconv.Atoi(vector.SelectAttrValue("size", "0"))
+	vector.CreateAttr("size", strconv.Itoa(size+1))
+}
+
+// --- Shape ID management ---
+
+// incrementShapeIDs recursively assigns new IDs to a shape and its children.
+// Returns a map of old ID -> new ID.
+func (v *VisioFile) incrementShapeIDs(shape *etree.Element, page *Page, idMap map[string]string) map[string]string {
+	if idMap == nil {
+		idMap = make(map[string]string)
+	}
+	v.setNewID(shape, page, idMap)
+	for _, shapesElem := range shape.SelectElements("Shapes") {
+		v.incrementShapeIDs(shapesElem, page, idMap)
+	}
+	for _, shapeElem := range shape.SelectElements("Shape") {
+		v.setNewID(shapeElem, page, idMap)
+	}
+	return idMap
+}
+
+// setNewID assigns a new unique ID to an element, recording the mapping.
+func (v *VisioFile) setNewID(element *etree.Element, page *Page, idMap map[string]string) {
+	page.MaxID++
+	newID := strconv.Itoa(page.MaxID)
+	currentID := element.SelectAttrValue("ID", "")
+	if currentID != "" {
+		idMap[currentID] = newID
+	}
+	element.CreateAttr("ID", newID)
+}
+
+// updateIDs updates Sheet.N references in Cell formulas using the ID map.
+func (v *VisioFile) updateIDs(shape *etree.Element, idMap map[string]string) {
+	for _, shapesElem := range shape.SelectElements("Shapes") {
+		v.updateIDs(shapesElem, idMap)
+	}
+	for _, shapeElem := range shape.SelectElements("Shape") {
+		for _, cell := range shapeElem.SelectElements("Cell") {
+			f := cell.SelectAttrValue("F", "")
+			if strings.HasPrefix(f, "Sheet.") {
+				// Extract shape ID from "Sheet.N!..."
+				parts := strings.SplitN(f, "!", 2)
+				sheetRef := parts[0] // "Sheet.N"
+				shapeID := strings.TrimPrefix(sheetRef, "Sheet.")
+				if newID, ok := idMap[shapeID]; ok {
+					newF := strings.Replace(f, "Sheet."+shapeID, "Sheet."+newID, 1)
+					cell.CreateAttr("F", newF)
+				}
+			}
+		}
+	}
 }
 
 // SaveVsdx saves the VisioFile to a new .vsdx file.

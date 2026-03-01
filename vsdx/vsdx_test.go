@@ -1791,6 +1791,776 @@ func TestEditAndSaveRoundTrip(t *testing.T) {
 	}
 }
 
+// --- Fase 4: Page/Shape management ---
+
+func TestRemovePageByIndex(t *testing.T) {
+	vis, err := Open(testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origCount := len(vis.Pages)
+	if origCount < 2 {
+		t.Fatalf("expected at least 2 pages, got %d", origCount)
+	}
+	removedName := vis.Pages[0].Name()
+
+	vis.RemovePageByIndex(0)
+
+	if len(vis.Pages) != origCount-1 {
+		t.Errorf("page count = %d, want %d", len(vis.Pages), origCount-1)
+	}
+	// Check removed page name is gone
+	for _, p := range vis.Pages {
+		if p.Name() == removedName {
+			t.Errorf("page %q still exists after removal", removedName)
+		}
+	}
+}
+
+func TestRemovePageByName(t *testing.T) {
+	vis, err := Open(testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origCount := len(vis.Pages)
+	pageName := vis.Pages[1].Name()
+
+	vis.RemovePageByName(pageName)
+
+	if len(vis.Pages) != origCount-1 {
+		t.Errorf("page count = %d, want %d", len(vis.Pages), origCount-1)
+	}
+	for _, p := range vis.Pages {
+		if p.Name() == pageName {
+			t.Errorf("page %q still exists after removal", pageName)
+		}
+	}
+}
+
+func TestRemovePageAndSave(t *testing.T) {
+	vis, err := Open(testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origCount := len(vis.Pages)
+	vis.RemovePageByIndex(0)
+
+	outFile := filepath.Join(t.TempDir(), "removed_page.vsdx")
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis2.Close()
+
+	if len(vis2.Pages) != origCount-1 {
+		t.Errorf("reopened page count = %d, want %d", len(vis2.Pages), origCount-1)
+	}
+}
+
+func TestAddPage(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origCount := len(vis.Pages)
+	newPage := vis.AddPage("TestNewPage")
+
+	if newPage == nil {
+		t.Fatal("AddPage returned nil")
+	}
+	if newPage.Name() != "TestNewPage" {
+		t.Errorf("name = %q, want %q", newPage.Name(), "TestNewPage")
+	}
+	if len(vis.Pages) != origCount+1 {
+		t.Errorf("page count = %d, want %d", len(vis.Pages), origCount+1)
+	}
+	// New page should be at the end
+	if vis.Pages[len(vis.Pages)-1] != newPage {
+		t.Error("new page not at end of pages list")
+	}
+}
+
+func TestAddPageAt(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origCount := len(vis.Pages)
+	newPage := vis.AddPageAt(0, "FirstPage")
+
+	if newPage == nil {
+		t.Fatal("AddPageAt returned nil")
+	}
+	if len(vis.Pages) != origCount+1 {
+		t.Errorf("page count = %d, want %d", len(vis.Pages), origCount+1)
+	}
+	if vis.Pages[0] != newPage {
+		t.Error("new page not at index 0")
+	}
+	if vis.Pages[0].Name() != "FirstPage" {
+		t.Errorf("name = %q, want %q", vis.Pages[0].Name(), "FirstPage")
+	}
+}
+
+func TestAddPageDuplicateName(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	existingName := vis.Pages[0].Name()
+	newPage := vis.AddPage(existingName)
+
+	if newPage.Name() == existingName {
+		t.Errorf("expected unique name, got duplicate: %q", newPage.Name())
+	}
+	// Name should be existingName-1
+	if newPage.Name() != existingName+"-1" {
+		t.Errorf("name = %q, want %q", newPage.Name(), existingName+"-1")
+	}
+}
+
+func TestAddPageAndSave(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	vis.AddPage("NewSavedPage")
+
+	outFile := filepath.Join(t.TempDir(), "added_page.vsdx")
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis2.Close()
+
+	found := false
+	for _, p := range vis2.Pages {
+		if p.Name() == "NewSavedPage" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("new page not found after save/reopen")
+	}
+}
+
+func TestCopyPage(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origPage := vis.Pages[0]
+	origShapeCount := len(origPage.ChildShapes())
+	origCount := len(vis.Pages)
+
+	newPage := vis.CopyPage(origPage, int(PageAfter), "CopiedPage")
+
+	if newPage == nil {
+		t.Fatal("CopyPage returned nil")
+	}
+	if newPage.Name() != "CopiedPage" {
+		t.Errorf("name = %q, want %q", newPage.Name(), "CopiedPage")
+	}
+	if len(vis.Pages) != origCount+1 {
+		t.Errorf("page count = %d, want %d", len(vis.Pages), origCount+1)
+	}
+
+	// Copied page should have same shapes as original
+	copiedShapes := newPage.ChildShapes()
+	if len(copiedShapes) != origShapeCount {
+		t.Errorf("copied shape count = %d, want %d", len(copiedShapes), origShapeCount)
+	}
+}
+
+func TestCopyPageAndSave(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	origPage := vis.Pages[0]
+	vis.CopyPage(origPage, int(PageLast), "CopyTest")
+
+	outFile := filepath.Join(t.TempDir(), "copied_page.vsdx")
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis2.Close()
+
+	found := false
+	for _, p := range vis2.Pages {
+		if p.Name() == "CopyTest" {
+			found = true
+			// Verify the page has shapes
+			if len(p.ChildShapes()) == 0 {
+				t.Error("copied page has no shapes after save/reopen")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("copied page not found after save/reopen")
+	}
+}
+
+func TestCopyShape(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	srcPage := vis.Pages[0]
+	srcShapes := srcPage.ChildShapes()
+	if len(srcShapes) == 0 {
+		t.Fatal("no shapes on source page")
+	}
+
+	// Copy first shape to same page (which already has shapes, so IDs will differ)
+	origShapeCount := len(srcShapes)
+
+	newShapeElem := vis.CopyShape(srcShapes[0].XML(), srcPage)
+	if newShapeElem == nil {
+		t.Fatal("CopyShape returned nil")
+	}
+
+	// Re-read page to get updated shapes
+	updatedShapes := srcPage.ChildShapes()
+	if len(updatedShapes) != origShapeCount+1 {
+		t.Errorf("shape count = %d, want %d", len(updatedShapes), origShapeCount+1)
+	}
+
+	// Verify new shape has a different ID from original (page already had shapes)
+	origID := srcShapes[0].ID
+	newID := newShapeElem.SelectAttrValue("ID", "")
+	if newID == origID {
+		t.Errorf("new shape ID %q should differ from original %q", newID, origID)
+	}
+}
+
+func TestCopyShapeAndSave(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	srcPage := vis.Pages[0]
+	srcShapes := srcPage.ChildShapes()
+	if len(srcShapes) == 0 {
+		t.Fatal("no shapes on source page")
+	}
+
+	// Add a new empty page and copy shape to it
+	newPage := vis.AddPage("ShapeCopyDst")
+	vis.CopyShape(srcShapes[0].XML(), newPage)
+
+	outFile := filepath.Join(t.TempDir(), "shape_copied.vsdx")
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis2.Close()
+
+	dstPage := vis2.GetPageByName("ShapeCopyDst")
+	if dstPage == nil {
+		t.Fatal("destination page not found")
+	}
+	if len(dstPage.ChildShapes()) != 1 {
+		t.Errorf("expected 1 shape on destination page, got %d", len(dstPage.ChildShapes()))
+	}
+}
+
+// --- Fase 5: Connectors ---
+
+func TestOpenBytes(t *testing.T) {
+	data, err := os.ReadFile(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vis, err := OpenBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	if len(vis.Pages) == 0 {
+		t.Fatal("expected pages")
+	}
+	if len(vis.Pages[0].ChildShapes()) != 4 {
+		t.Errorf("expected 4 child shapes, got %d", len(vis.Pages[0].ChildShapes()))
+	}
+}
+
+func TestNewMedia(t *testing.T) {
+	media, err := NewMedia()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer media.Close()
+
+	if sc := media.StraightConnector(); sc == nil {
+		t.Error("straight connector not found")
+	} else {
+		t.Logf("straight connector: ID=%s Name=%q", sc.ID, sc.ShapeName)
+	}
+	if cc := media.CurvedConnector(); cc == nil {
+		t.Error("curved connector not found")
+	}
+	if r := media.Rectangle(); r == nil {
+		t.Error("rectangle not found")
+	}
+	if c := media.Circle(); c == nil {
+		t.Error("circle not found")
+	}
+	if l := media.Line(); l == nil {
+		t.Error("line not found")
+	}
+}
+
+func TestSetStartAndFinish(t *testing.T) {
+	vis, err := Open(testFile("test4_connectors.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.Pages[0]
+	// Find a connector shape (one with BeginX)
+	var connector *Shape
+	for _, s := range page.AllShapes() {
+		if s.HasBeginX() {
+			connector = s
+			break
+		}
+	}
+	if connector == nil {
+		t.Skip("no connector shape found")
+	}
+
+	// Set new start and finish
+	connector.SetStartAndFinish(1.0, 2.0, 5.0, 6.0)
+
+	if connector.BeginX() != 1.0 {
+		t.Errorf("BeginX = %v, want 1.0", connector.BeginX())
+	}
+	if connector.BeginY() != 2.0 {
+		t.Errorf("BeginY = %v, want 2.0", connector.BeginY())
+	}
+	if connector.EndX() != 5.0 {
+		t.Errorf("EndX = %v, want 5.0", connector.EndX())
+	}
+	if connector.EndY() != 6.0 {
+		t.Errorf("EndY = %v, want 6.0", connector.EndY())
+	}
+	if connector.Width() != 4.0 {
+		t.Errorf("Width = %v, want 4.0", connector.Width())
+	}
+}
+
+func TestConnectShapes(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.Pages[0]
+	shapes := page.ChildShapes()
+	if len(shapes) < 2 {
+		t.Fatalf("need at least 2 shapes, got %d", len(shapes))
+	}
+
+	fromShape := shapes[0]
+	toShape := shapes[1]
+
+	connectorShape, err := vis.ConnectShapes(page, fromShape, toShape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connectorShape == nil {
+		t.Fatal("ConnectShapes returned nil")
+	}
+
+	// Check connector has BeginX/Y and EndX/Y
+	if !connectorShape.HasBeginX() {
+		t.Error("connector should have BeginX")
+	}
+
+	// Check Connect elements were created
+	connects := page.Connects()
+	foundBeg := false
+	foundEnd := false
+	for _, c := range connects {
+		if c.ConnectorShapeID() == connectorShape.ID {
+			if c.FromRel == "BeginX" && c.ShapeID() == fromShape.ID {
+				foundBeg = true
+			}
+			if c.FromRel == "EndX" && c.ShapeID() == toShape.ID {
+				foundEnd = true
+			}
+		}
+	}
+	if !foundBeg {
+		t.Error("BeginX connect not found")
+	}
+	if !foundEnd {
+		t.Error("EndX connect not found")
+	}
+}
+
+func TestConnectShapesAndSave(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.Pages[0]
+	shapes := page.ChildShapes()
+	if len(shapes) < 2 {
+		t.Fatalf("need at least 2 shapes, got %d", len(shapes))
+	}
+
+	_, err = vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outFile := filepath.Join(t.TempDir(), "connected.vsdx")
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis2.Close()
+
+	page2 := vis2.Pages[0]
+	connects := page2.Connects()
+	if len(connects) < 2 {
+		t.Errorf("expected at least 2 connects after save/reopen, got %d", len(connects))
+	}
+
+	// Should have master pages now
+	if len(vis2.MasterPages) == 0 {
+		t.Error("expected master pages after creating connector")
+	}
+}
+
+// --- Fase 6: Templating ---
+
+func TestRenderTemplateBasicTextReplacement(t *testing.T) {
+	vis, err := Open(testFile("test_jinja.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	context := map[string]interface{}{
+		"date":     "2024-01-15",
+		"scenario": "Scenario One",
+		"x":        2,
+		"y":        3,
+	}
+	vis.RenderTemplate(context)
+
+	page := vis.Pages[0]
+	// Check that scenario text was replaced
+	shape := page.FindShapeByText("Scenario One")
+	if shape == nil {
+		t.Error("expected shape with 'Scenario One' text after template render")
+	}
+}
+
+func TestRenderTemplateCalc(t *testing.T) {
+	vis, err := Open(testFile("test_jinja.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	context := map[string]interface{}{
+		"date":     "2024-01-15",
+		"scenario": "Test",
+		"x":        3,
+		"y":        4,
+	}
+	vis.RenderTemplate(context)
+
+	page := vis.Pages[0]
+	// Check that x*y = 12 exists in a shape
+	shape := page.FindShapeByText("12")
+	if shape == nil {
+		t.Error("expected shape with '12' (3*4) after template calc")
+	}
+}
+
+func TestRenderTemplateShowIfShapes(t *testing.T) {
+	tests := []struct {
+		x          int
+		shapeCount int
+	}{
+		{0, 1},  // x=0: only first shape (both showifs evaluate to false)
+		{5, 2},  // x=5: first + "if x" shape (x is truthy but not > 10)
+		{20, 3}, // x=20: all three shapes
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("x=%d", tt.x), func(t *testing.T) {
+			vis, err := Open(testFile("test_jinja.vsdx"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer vis.Close()
+
+			context := map[string]interface{}{
+				"date":     "now",
+				"scenario": "Test",
+				"x":        tt.x,
+				"y":        1,
+			}
+			vis.RenderTemplate(context)
+
+			page := vis.Pages[1] // showif test page
+			count := len(page.ChildShapes())
+			if count != tt.shapeCount {
+				t.Errorf("x=%d: shape count = %d, want %d", tt.x, count, tt.shapeCount)
+			}
+		})
+	}
+}
+
+func TestRenderTemplateForLoop(t *testing.T) {
+	vis, err := Open(testFile("test_jinja_loop.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	context := map[string]interface{}{
+		"date":      "2024-01-15",
+		"scenario":  "Scenario One",
+		"test_list": []interface{}{1, 2, 3},
+	}
+	vis.RenderTemplate(context)
+
+	page := vis.Pages[0]
+
+	// Check that scenario was replaced
+	shape := page.FindShapeByText("Scenario One")
+	if shape == nil {
+		t.Error("expected shape with 'Scenario One'")
+	}
+
+	// Check that shapes exist for each loop item
+	for _, item := range []string{"1", "2", "3"} {
+		if s := page.FindShapeByText(item); s == nil {
+			t.Errorf("expected shape with text %q from for loop", item)
+		}
+	}
+}
+
+func TestRenderTemplateForLoopStrings(t *testing.T) {
+	vis, err := Open(testFile("test_jinja_loop.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	context := map[string]interface{}{
+		"date":      "2024-01-15",
+		"scenario":  "Scenario Two",
+		"test_list": []interface{}{"One", "Two", "Three"},
+	}
+	vis.RenderTemplate(context)
+
+	page := vis.Pages[0]
+	for _, item := range []string{"One", "Two", "Three"} {
+		if s := page.FindShapeByText(item); s == nil {
+			t.Errorf("expected shape with text %q from for loop", item)
+		}
+	}
+}
+
+func TestRenderTemplatePageShowIf(t *testing.T) {
+	tests := []struct {
+		show          interface{}
+		pageCount     int
+		expectedNames []string
+	}{
+		{true, 2, []string{"Normal Page", "Page2"}},
+		{1, 2, []string{"Normal Page", "Page2"}},
+		{false, 2, []string{"Normal Page", "Page3"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("show=%v", tt.show), func(t *testing.T) {
+			vis, err := Open(testFile("test_jinja_page_showif.vsdx"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer vis.Close()
+
+			context := map[string]interface{}{"show": tt.show}
+			vis.RenderTemplate(context)
+
+			if len(vis.Pages) != tt.pageCount {
+				t.Errorf("page count = %d, want %d", len(vis.Pages), tt.pageCount)
+			}
+
+			names := vis.GetPageNames()
+			for i, expected := range tt.expectedNames {
+				if i >= len(names) {
+					t.Errorf("missing page at index %d", i)
+					continue
+				}
+				if names[i] != expected {
+					t.Errorf("page[%d] name = %q, want %q", i, names[i], expected)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderTemplateSetSelf(t *testing.T) {
+	tests := []struct {
+		n         int
+		shapeID   string
+		expectedX float64
+	}{
+		{1, "1", 2.0},  // {% set self.x=2.0 %}
+		{2, "2", 4.0},  // {% set self.x=n*2 %} with n=2
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("n=%d_shape=%s", tt.n, tt.shapeID), func(t *testing.T) {
+			vis, err := Open(testFile("test_jinja_self_refs.vsdx"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer vis.Close()
+
+			context := map[string]interface{}{"n": tt.n}
+			vis.RenderTemplate(context)
+
+			page := vis.Pages[0]
+			shape := page.FindShapeByID(tt.shapeID)
+			if shape == nil {
+				t.Fatalf("shape %s not found", tt.shapeID)
+			}
+
+			if shape.X() != tt.expectedX {
+				t.Errorf("shape %s x = %v, want %v", tt.shapeID, shape.X(), tt.expectedX)
+			}
+		})
+	}
+}
+
+func TestRenderTemplateSetSelfText(t *testing.T) {
+	vis, err := Open(testFile("test_jinja_self_refs.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	context := map[string]interface{}{"n": 1}
+	vis.RenderTemplate(context)
+
+	page := vis.Pages[0]
+	shape := page.FindShapeByID("1")
+	if shape == nil {
+		t.Fatal("shape 1 not found")
+	}
+
+	text := shape.Text()
+	// set self directive should be removed
+	if strings.Contains(text, "{% set") {
+		t.Errorf("set self directive not removed from text: %q", text)
+	}
+	if !strings.Contains(text, "This text should remain") {
+		t.Errorf("expected text to contain 'This text should remain', got %q", text)
+	}
+}
+
+func TestRenderTemplateAndSave(t *testing.T) {
+	vis, err := Open(testFile("test_jinja.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	context := map[string]interface{}{
+		"date":     "2024-01-15",
+		"scenario": "SaveTest",
+		"x":        5,
+		"y":        6,
+	}
+	vis.RenderTemplate(context)
+
+	outFile := filepath.Join(t.TempDir(), "template_rendered.vsdx")
+	if err := vis.SaveVsdx(outFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-open and verify
+	vis2, err := Open(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis2.Close()
+
+	page := vis2.Pages[0]
+	if s := page.FindShapeByText("SaveTest"); s == nil {
+		t.Error("template replacement not found after save/reopen")
+	}
+	if s := page.FindShapeByText("30"); s == nil {
+		t.Error("expected '30' (5*6) after save/reopen")
+	}
+}
+
 // --- Helpers ---
 
 func assertStringSlice(t *testing.T, name string, actual, expected []string) {
@@ -1824,4 +2594,172 @@ func sortedGeometryRows(rows map[string]*GeometryRow) []*GeometryRow {
 		result = append(result, rows[k])
 	}
 	return result
+}
+
+// --- Fase 7: Diff ---
+
+func TestNewVisioFileDiff(t *testing.T) {
+	tests := []struct {
+		fileA, fileB string
+	}{
+		{"test1.vsdx", "test2.vsdx"},
+		{"test1.vsdx", "test4_connectors.vsdx"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.fileA+"_vs_"+tt.fileB, func(t *testing.T) {
+			fd, err := NewVisioFileDiff(testFile(tt.fileA), testFile(tt.fileB))
+			if err != nil {
+				t.Fatalf("NewVisioFileDiff error: %v", err)
+			}
+			if fd == nil {
+				t.Fatal("expected non-nil VisioFileDiff")
+			}
+
+			// Should have common members
+			common := fd.CommonMembers()
+			if len(common) == 0 {
+				t.Error("expected common members")
+			}
+
+			// Should have diffs (different files)
+			if len(fd.Diffs) == 0 {
+				t.Error("expected diffs between different files")
+			}
+
+			t.Logf("Common members: %d", len(common))
+			t.Logf("Diffs: %d members with differences", len(fd.Diffs))
+			t.Logf("Added: %v", fd.AddedMembers())
+			t.Logf("Removed: %v", fd.RemovedMembers())
+		})
+	}
+}
+
+func TestVisioFileDiffSameFile(t *testing.T) {
+	_, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test1.vsdx"))
+	if err == nil {
+		t.Error("expected error when comparing same file path")
+	}
+}
+
+func TestVisioFileDiffInvalidExtension(t *testing.T) {
+	_, err := NewVisioFileDiff("file.txt", "file2.vsdx")
+	if err == nil {
+		t.Error("expected error for non-.vsdx file")
+	}
+}
+
+func TestVisioFileDiffCompareMembers(t *testing.T) {
+	fd, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	// test1 has 3 pages, test2 has 3 pages but different content
+	// They may or may not have same members depending on structure
+	t.Logf("CompareMembers: %v", fd.CompareMembers())
+}
+
+func TestVisioFileDiffAddedRemoved(t *testing.T) {
+	fd, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test4_connectors.vsdx"))
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	// test4_connectors has master pages that test1 doesn't
+	added := fd.AddedMembers()
+	removed := fd.RemovedMembers()
+	t.Logf("Added in test4: %v", added)
+	t.Logf("Removed in test4: %v", removed)
+
+	// test4_connectors.vsdx has masters, test1 doesn't
+	if len(added) == 0 && len(removed) == 0 {
+		// If both happen to have same members, that's ok too
+		t.Log("Both files have same member paths")
+	}
+}
+
+func TestVisioFileDiffDiffContent(t *testing.T) {
+	fd, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	// pages.xml should be different (different page definitions)
+	pagesKey := ""
+	for k := range fd.Diffs {
+		if strings.Contains(k, "pages.xml") && !strings.Contains(k, "page1") {
+			pagesKey = k
+			break
+		}
+	}
+	if pagesKey != "" {
+		diff := fd.Diffs[pagesKey]
+		t.Logf("pages.xml diff has %d lines", len(diff))
+
+		// Verify diff lines have proper prefixes
+		for _, line := range diff {
+			if !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "+ ") {
+				t.Errorf("diff line missing prefix: %q", line)
+			}
+		}
+	}
+}
+
+func TestVisioFileDiffString(t *testing.T) {
+	fd, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	s := fd.String()
+	if !strings.Contains(s, "test1.vsdx") || !strings.Contains(s, "test2.vsdx") {
+		t.Errorf("String() should contain file paths, got: %s", s)
+	}
+}
+
+func TestComputeDiff(t *testing.T) {
+	a := []string{"line1", "line2", "line3"}
+	b := []string{"line1", "modified", "line3", "added"}
+
+	diff := computeDiff(a, b)
+
+	// Should have "  line1", "- line2", "+ modified", "  line3", "+ added"
+	hasRemoved := false
+	hasAdded := false
+	hasSame := false
+	for _, line := range diff {
+		if strings.HasPrefix(line, "- ") {
+			hasRemoved = true
+		}
+		if strings.HasPrefix(line, "+ ") {
+			hasAdded = true
+		}
+		if strings.HasPrefix(line, "  ") {
+			hasSame = true
+		}
+	}
+	if !hasRemoved || !hasAdded || !hasSame {
+		t.Errorf("diff should have removed, added, and same lines: %v", diff)
+	}
+}
+
+func TestBreakXMLIntoLines(t *testing.T) {
+	xml := `<?xml version="1.0"?><Root><Child attr="val"/></Root>`
+	lines := breakXMLIntoLines(xml)
+
+	// Should split at each '<'
+	foundRoot := false
+	foundChild := false
+	for _, line := range lines {
+		if strings.Contains(line, "<Root>") {
+			foundRoot = true
+		}
+		if strings.Contains(line, "<Child") {
+			foundChild = true
+		}
+	}
+	if !foundRoot || !foundChild {
+		t.Errorf("expected XML elements on separate lines, got: %v", lines)
+	}
 }

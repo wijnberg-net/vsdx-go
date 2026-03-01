@@ -106,6 +106,30 @@ page.ApplyTextContext(map[string]string{
 vis.SaveVsdx("rendered.vsdx")
 ```
 
+### Render templates
+
+```go
+// Use Jinja2-style directives in shape text
+vis, _ := vsdx.Open("template.vsdx")
+defer vis.Close()
+
+vis.RenderTemplate(map[string]interface{}{
+    "name":      "Production",
+    "count":     42,
+    "show_info": true,
+    "items":     []interface{}{"Server A", "Server B", "Server C"},
+})
+vis.SaveVsdx("rendered.vsdx")
+```
+
+Supported directives in shape text:
+- `{{key}}` - Replace with context value (supports arithmetic: `{{x*y}}`)
+- `{% for item in list %}` - Duplicate shape for each item in list
+- `{% showif condition %}` - Conditionally show/hide shape (supports `not`, `>`, `<`, `==`, etc.)
+- `{% set self.x = expr %}` - Set shape property (x, y, width, height) from expression
+
+Page names can also contain `{% showif condition %}` to conditionally include/exclude pages.
+
 ### Work with connectors
 
 ```go
@@ -124,6 +148,16 @@ shape := page.FindShapeByID("1")
 for _, connected := range shape.ConnectedShapes() {
     fmt.Println("Connected to:", connected.Text())
 }
+
+// Create a new connector between two shapes
+shapeA := page.FindShapeByText("Server")
+shapeB := page.FindShapeByText("Database")
+connector, err := vis.ConnectShapes(page, shapeA, shapeB)
+if err != nil {
+    panic(err)
+}
+fmt.Println("Created connector:", connector.ID)
+vis.SaveVsdx("connected.vsdx")
 ```
 
 ### Work with data properties
@@ -138,6 +172,49 @@ for label, prop := range props {
 
 // Find shapes by property
 shapes := page.FindShapesByPropertyLabelValue("Status", "Active")
+```
+
+### Add, copy, and remove pages
+
+```go
+vis, _ := vsdx.Open("my_file.vsdx")
+defer vis.Close()
+
+// Add a new empty page
+newPage := vis.AddPage("Reports")
+
+// Copy an existing page
+original := vis.GetPage(0)
+copy := vis.CopyPage(original, int(vsdx.PageAfter), "Page-1 Copy")
+
+// Remove a page
+vis.RemovePageByName("Old Page")
+
+// Copy a shape from one page to another
+shape := original.FindShapeByText("Template")
+vis.CopyShape(shape.XML(), newPage)
+
+vis.SaveVsdx("updated.vsdx")
+```
+
+### Compare two .vsdx files
+
+```go
+diff, err := vsdx.NewVisioFileDiff("file_v1.vsdx", "file_v2.vsdx")
+if err != nil {
+    panic(err)
+}
+
+fmt.Println("Same members:", diff.CompareMembers())
+fmt.Println("Added:", diff.AddedMembers())
+fmt.Println("Removed:", diff.RemovedMembers())
+
+for member, lines := range diff.Diffs {
+    fmt.Printf("\n%s:\n", member)
+    for _, line := range lines {
+        fmt.Println(line)  // "  " same, "- " removed, "+ " added
+    }
+}
 ```
 
 ### Master shapes
@@ -168,6 +245,8 @@ if masterPage := shape.MasterPage(); masterPage != nil {
 | `DataProperty` | Custom data property of a shape |
 | `Connect` | Connection between two shapes |
 | `Geometry` | Shape path definition (MoveTo, LineTo, etc.) |
+| `Media` | Template shapes (connector, rectangle, circle, line) |
+| `VisioFileDiff` | Compare two .vsdx files (added/removed/changed members) |
 
 ### VisioFile
 
@@ -184,6 +263,19 @@ vis.GetPageNames()                      // list names
 // Master pages
 vis.MasterPages                         // []*Page
 vis.GetMasterPageByID("2")              // by ID
+
+// Page management
+vis.AddPage("New Page")                 // add at end
+vis.AddPageAt(0, "First Page")          // add at index
+vis.CopyPage(page, int(vsdx.PageAfter), "Copy") // copy page
+vis.RemovePageByIndex(2)                // remove by index
+vis.RemovePageByName("Page-3")          // remove by name
+
+// Shape copy
+vis.CopyShape(shape.XML(), destPage)    // copy shape with new IDs
+
+// Connect shapes
+conn, _ := vis.ConnectShapes(page, shapeA, shapeB)
 
 // Save
 vis.SaveVsdx("output.vsdx")
@@ -290,10 +382,10 @@ visio/masters/master1.xml     Individual master shapes
 | 1. Reading | Done | Open ZIP, parse XML, populate structs |
 | 2. Navigation | Done | Search shapes by ID, text, property, regex, master |
 | 3. Editing | Done | Modify properties, text, style, move, remove shapes |
-| 4. Writing | Done | Save modified XML back to .vsdx |
-| 5. Connectors | Planned | Create new connections between shapes |
-| 6. Templating | Planned | Go text/template based rendering |
-| 7. Diff | Planned | Compare two .vsdx files |
+| 4. Writing | Done | Save modified XML back to .vsdx, add/remove/copy pages, copy shapes |
+| 5. Connectors | Done | Create new connections between shapes |
+| 6. Templating | Done | Jinja2-style template directives in shape text |
+| 7. Diff | Done | Compare two .vsdx files |
 
 ## Credits
 

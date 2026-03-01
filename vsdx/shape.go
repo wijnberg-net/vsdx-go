@@ -118,6 +118,11 @@ func newShape(xml *etree.Element, parent interface{}, page *Page) *Shape {
 	return s
 }
 
+// XML returns the underlying XML element of the shape.
+func (s *Shape) XML() *etree.Element {
+	return s.xml
+}
+
 func (s *Shape) String() string {
 	return fmt.Sprintf("<Shape ID=%s type=%s text='%s'>", s.ID, s.ShapeType, s.Text())
 }
@@ -456,6 +461,89 @@ func (s *Shape) ApplyTextFilter(context map[string]string) {
 	s.SetText(text)
 	for _, child := range s.ChildShapes() {
 		child.ApplyTextFilter(context)
+	}
+}
+
+// SetStartAndFinish sets the start and end positions of a connector or line shape.
+// start is (x, y) of the beginning point, finish is (x, y) of the ending point.
+func (s *Shape) SetStartAndFinish(startX, startY, finishX, finishY float64) {
+	if !s.HasBeginX() {
+		return // only apply to lines and connector shapes
+	}
+
+	isConnector := s.UniversalName() == "Dynamic connector"
+
+	s.SetBeginX(startX)
+	s.SetBeginY(startY)
+	s.SetEndX(finishX)
+	s.SetEndY(finishY)
+
+	width := finishX - startX
+	s.SetWidth(width)
+	if isConnector {
+		s.SetHeight(finishY - startY)
+	} else {
+		s.SetHeight(0)
+	}
+
+	s.SetX(startX)
+	s.SetY(startY)
+
+	if s.Geometry != nil {
+		s.Geometry.SetMoveTo(0, 0, 0)
+		s.Geometry.SetLineTo(width, finishY-startY, 0)
+	}
+
+	// Update text pin positions
+	txtPinX := s.Cells["TxtPinX"]
+	txtPinY := s.Cells["TxtPinY"]
+	if txtPinX != nil && txtPinY != nil {
+		if isConnector {
+			txtPinX.SetValue(strconv.FormatFloat(width/2, 'f', -1, 64))
+			txtPinY.SetValue(strconv.FormatFloat((finishY-startY)/2, 'f', -1, 64))
+		} else {
+			cx, cy := s.CenterXY()
+			txtPinX.SetValue(strconv.FormatFloat(cx, 'f', -1, 64))
+			txtPinY.SetValue(strconv.FormatFloat(cy, 'f', -1, 64))
+		}
+		pinXStr := txtPinX.Value()
+		pinYStr := txtPinY.Value()
+		s.SetCellValue("Control/TextPosition/X", pinXStr)
+		s.SetCellValue("Control/TextPosition/Y", pinYStr)
+		s.SetCellValue("Control/TextPosition/XDyn", pinXStr)
+		s.SetCellValue("Control/TextPosition/YDyn", pinYStr)
+	}
+
+	// Evaluate formulas on all cells (shape cells + geometry cells)
+	var cellElems []*etree.Element
+	for _, c := range s.Cells {
+		cellElems = append(cellElems, c.xml)
+	}
+	if s.Geometry != nil {
+		for _, gc := range s.Geometry.Cells {
+			cellElems = append(cellElems, gc.xml)
+		}
+		for _, row := range s.Geometry.Rows {
+			for _, gc := range row.Cells {
+				cellElems = append(cellElems, gc.xml)
+			}
+		}
+	}
+	for _, elem := range cellElems {
+		formula := elem.SelectAttrValue("F", "")
+		if formula != "" {
+			cellName := elem.SelectAttrValue("N", "")
+			if formula == "Inh" && s.MasterPageID != "" {
+				if ms := s.MasterShape(); ms != nil {
+					if masterCell, ok := ms.Cells[cellName]; ok {
+						formula = masterCell.Formula()
+					}
+				}
+			}
+			if v, ok := CalcValue(s, formula); ok {
+				elem.CreateAttr("V", strconv.FormatFloat(v, 'f', -1, 64))
+			}
+		}
 	}
 }
 

@@ -157,10 +157,10 @@ const (
 1. **Fase 1 - Lezen:** ZIP openen, XML parsen, Page/Shape/Cell structs vullen - **DONE**
 2. **Fase 2 - Navigatie:** Shapes zoeken (by ID, text, property, regex, master), hiërarchie doorlopen - **DONE**
 3. **Fase 3 - Bewerken:** Shape properties wijzigen, tekst, stijl, positie, move, remove - **DONE**
-4. **Fase 4 - Schrijven:** Gewijzigde XML terug opslaan als .vsdx (SaveVsdx) - **DONE** (basis)
-5. **Fase 5 - Connectors:** Connect aanmaken, shapes verbinden
-6. **Fase 6 - Templating:** Template engine (optioneel, Go text/template)
-7. **Fase 7 - Diff:** Bestandsvergelijking
+4. **Fase 4 - Schrijven:** Gewijzigde XML opslaan, pagina's toevoegen/verwijderen/kopiëren, shapes kopiëren - **DONE**
+5. **Fase 5 - Connectors:** ConnectShapes, SetStartAndFinish, Media template shapes - **DONE**
+6. **Fase 6 - Templating:** RenderTemplate met Jinja2-achtige directives ({{key}}, for loops, showif, set self) - **DONE**
+7. **Fase 7 - Diff:** VisioFileDiff met LCS-gebaseerde vergelijking van ZIP-inhoud - **DONE**
 
 ## Commando's
 
