@@ -2,6 +2,7 @@ package vsdx
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -377,6 +378,48 @@ func (s *Shape) FindShapesByPropertyLabelValue(label, value string) []*Shape {
 		}
 	}
 	return result
+}
+
+// ShapeValue returns the value of an XML attribute on the shape element.
+func (s *Shape) ShapeValue(name string) string {
+	return s.xml.SelectAttrValue(name, "")
+}
+
+// FindShapesByID recursively searches for all shapes with the given ID.
+func (s *Shape) FindShapesByID(shapeID string) []*Shape {
+	var result []*Shape
+	for _, shape := range s.AllShapes() {
+		if shape.ID == shapeID {
+			result = append(result, shape)
+		}
+	}
+	return result
+}
+
+// FindShapesByMaster recursively searches for all shapes with the given master page and shape IDs.
+func (s *Shape) FindShapesByMaster(masterPageID, masterShapeID string) []*Shape {
+	var result []*Shape
+	for _, shape := range s.AllShapes() {
+		if shape.MasterShapeID == masterShapeID && shape.MasterPageID == masterPageID {
+			result = append(result, shape)
+		}
+	}
+	return result
+}
+
+// FindShapesByRegex recursively searches for all shapes whose text matches the given regex pattern.
+func (s *Shape) FindShapesByRegex(pattern string) ([]*Shape, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid regex %q: %w", pattern, err)
+	}
+	var result []*Shape
+	for _, shape := range s.AllShapes() {
+		if re.FindString(shape.Text()) != "" {
+			result = append(result, shape)
+		}
+	}
+	return result, nil
 }
 
 // FindShapeByAttr searches for a shape by XML attribute name and value.

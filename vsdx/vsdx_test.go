@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -1048,6 +1049,195 @@ func TestSaveAndReopen(t *testing.T) {
 	}
 	if vis2.GetPage(0).Name() != "Page-1" {
 		t.Errorf("page name = %q, want 'Page-1'", vis2.GetPage(0).Name())
+	}
+}
+
+// --- Fase 2: Navigation ---
+
+func TestShapeValue(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shape := vis.GetPage(0).FindShapeByText("Shape Text")
+	if shape == nil {
+		t.Fatal("shape not found")
+	}
+	// ID attribute should be accessible via ShapeValue
+	if shape.ShapeValue("ID") != shape.ID {
+		t.Errorf("ShapeValue(ID) = %q, want %q", shape.ShapeValue("ID"), shape.ID)
+	}
+	// Non-existent attribute should return empty string
+	if shape.ShapeValue("NonExistent") != "" {
+		t.Errorf("ShapeValue(NonExistent) = %q, want empty", shape.ShapeValue("NonExistent"))
+	}
+}
+
+func TestFindShapesByID(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	// Shape ID "1" should exist
+	shapes := page.FindShapesByID("1")
+	if len(shapes) != 1 {
+		t.Errorf("FindShapesByID('1') count = %d, want 1", len(shapes))
+	}
+	// Non-existent shape ID
+	shapes = page.FindShapesByID("999")
+	if len(shapes) != 0 {
+		t.Errorf("FindShapesByID('999') count = %d, want 0", len(shapes))
+	}
+}
+
+func TestFindShapesByMaster(t *testing.T) {
+	vis, err := Open(testFile("test5_master.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	// Shapes 1 and 3 both have MasterPageID="1"
+	s := page.shapes()
+	if len(s) == 0 {
+		t.Fatal("no shapes container")
+	}
+	found := s[0].FindShapesByMaster("1", "")
+	if len(found) != 2 {
+		t.Fatalf("FindShapesByMaster('1', '') count = %d, want 2", len(found))
+	}
+	var ids []string
+	for _, f := range found {
+		ids = append(ids, f.ID)
+	}
+	sort.Strings(ids)
+	assertStringSlice(t, "shape IDs", ids, []string{"1", "3"})
+}
+
+func TestFindShapesByRegex(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+
+	// Find shapes with text matching "Shape"
+	shapes, err := page.FindShapesByRegex("Shape")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shapes) == 0 {
+		t.Error("expected at least one shape matching 'Shape'")
+	}
+
+	// Find shapes with text matching date pattern
+	shapes, err = page.FindShapesByRegex(`\{\{date\}\}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shapes) != 1 {
+		t.Errorf("shapes matching date pattern = %d, want 1", len(shapes))
+	}
+
+	// Invalid regex should return error
+	_, err = page.FindShapesByRegex("[invalid")
+	if err == nil {
+		t.Error("expected error for invalid regex")
+	}
+}
+
+func TestFindShapesWithSameMaster(t *testing.T) {
+	vis, err := Open(testFile("test3_house.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	// Get first shape that has a master
+	var shapeWithMaster *Shape
+	for _, s := range page.AllShapes() {
+		if s.MasterPageID != "" {
+			shapeWithMaster = s
+			break
+		}
+	}
+	if shapeWithMaster == nil {
+		t.Skip("no shape with master found")
+	}
+
+	found := page.FindShapesWithSameMaster(shapeWithMaster)
+	if len(found) == 0 {
+		t.Error("expected at least one shape with same master")
+	}
+	// The original shape should be in the results
+	var foundOriginal bool
+	for _, s := range found {
+		if s.ID == shapeWithMaster.ID {
+			foundOriginal = true
+			break
+		}
+	}
+	if !foundOriginal {
+		t.Error("original shape not found in results")
+	}
+}
+
+func TestGetConnectorsBetween(t *testing.T) {
+	vis, err := Open(testFile("test4_connectors.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+
+	// Shapes 1 and 2 are connected via connector shape 6
+	connectors, err := page.GetConnectorsBetween("1", "", "2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connectors) != 1 {
+		t.Fatalf("connectors between 1 and 2 = %d, want 1", len(connectors))
+	}
+	if connectors[0].ID != "6" {
+		t.Errorf("connector ID = %q, want '6'", connectors[0].ID)
+	}
+
+	// Non-existent shape should return error
+	_, err = page.GetConnectorsBetween("999", "", "1", "")
+	if err == nil {
+		t.Error("expected error for non-existent shape")
+	}
+}
+
+func TestConnectString(t *testing.T) {
+	vis, err := Open(testFile("test4_connectors.vsdx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	page := vis.GetPage(0)
+	connects := page.Connects()
+	if len(connects) == 0 {
+		t.Fatal("expected connects")
+	}
+	str := connects[0].String()
+	if str == "" {
+		t.Error("expected non-empty string representation")
+	}
+	// Should contain "Connect:" prefix
+	if !strings.Contains(str, "Connect:") {
+		t.Errorf("String() = %q, want to contain 'Connect:'", str)
 	}
 }
 

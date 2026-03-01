@@ -1,6 +1,10 @@
 package vsdx
 
-import "github.com/beevik/etree"
+import (
+	"fmt"
+
+	"github.com/beevik/etree"
+)
 
 // Connect represents a connection between two shapes in a Visio page.
 type Connect struct {
@@ -21,6 +25,10 @@ func newConnect(xml *etree.Element, page *Page) *Connect {
 		FromRel: xml.SelectAttrValue("FromCell", ""),
 		ToRel:   xml.SelectAttrValue("ToCell", ""),
 	}
+}
+
+func (c *Connect) String() string {
+	return fmt.Sprintf("Connect: from=%s to=%s connector_id=%s shape_id=%s", c.FromID, c.ToID, c.ConnectorShapeID(), c.ShapeID())
 }
 
 // ShapeID returns the ID of the shape where the connector terminates (convenience for ToID).

@@ -1,6 +1,8 @@
 package vsdx
 
 import (
+	"fmt"
+
 	"github.com/beevik/etree"
 )
 
@@ -251,4 +253,80 @@ func (p *Page) FindShapesByPropertyLabelValue(label, value string) []*Shape {
 		shapes = append(shapes, s.FindShapesByPropertyLabelValue(label, value)...)
 	}
 	return shapes
+}
+
+// FindShapesByID searches for all shapes with the given ID on this page.
+func (p *Page) FindShapesByID(shapeID string) []*Shape {
+	for _, s := range p.shapes() {
+		if found := s.FindShapesByID(shapeID); len(found) > 0 {
+			return found
+		}
+	}
+	return nil
+}
+
+// FindShapesWithSameMaster returns all shapes that share the same master as the given shape.
+func (p *Page) FindShapesWithSameMaster(shape *Shape) []*Shape {
+	var result []*Shape
+	for _, s := range p.AllShapes() {
+		if s.MasterShapeID == shape.MasterShapeID && s.MasterPageID == shape.MasterPageID {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// FindShapesByRegex searches for all shapes whose text matches the given regex pattern on this page.
+func (p *Page) FindShapesByRegex(pattern string) ([]*Shape, error) {
+	s := p.shapes()
+	if len(s) > 0 {
+		return s[0].FindShapesByRegex(pattern)
+	}
+	return nil, nil
+}
+
+// GetConnectorsBetween finds connector shapes between two shapes identified by ID or text.
+// For each shape, specify either an ID or text to find it (ID takes priority).
+func (p *Page) GetConnectorsBetween(shapeAID, shapeAText, shapeBID, shapeBText string) ([]*Shape, error) {
+	var shapeA, shapeB *Shape
+	if shapeAID != "" {
+		shapeA = p.FindShapeByID(shapeAID)
+	} else {
+		shapeA = p.FindShapeByText(shapeAText)
+	}
+	if shapeBID != "" {
+		shapeB = p.FindShapeByID(shapeBID)
+	} else {
+		shapeB = p.FindShapeByText(shapeBText)
+	}
+
+	if shapeA == nil {
+		return nil, fmt.Errorf("shape A not found (id=%q text=%q)", shapeAID, shapeAText)
+	}
+	if shapeB == nil {
+		return nil, fmt.Errorf("shape B not found (id=%q text=%q)", shapeBID, shapeBText)
+	}
+
+	// Get connected shape IDs for each shape
+	connectedA := make(map[string]bool)
+	for _, s := range shapeA.ConnectedShapes() {
+		connectedA[s.ID] = true
+	}
+
+	// Find intersection: shapes connected to both A and B
+	connectorIDs := make(map[string]bool)
+	for _, s := range shapeB.ConnectedShapes() {
+		if connectedA[s.ID] {
+			connectorIDs[s.ID] = true
+		}
+	}
+
+	// Look up connector shapes
+	var connectors []*Shape
+	for id := range connectorIDs {
+		if shape := p.FindShapeByID(id); shape != nil {
+			connectors = append(connectors, shape)
+		}
+	}
+	return connectors, nil
 }
