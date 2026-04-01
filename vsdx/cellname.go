@@ -22,17 +22,42 @@ const (
 	CellHeight CellName = "Height"
 	CellAngle  CellName = "Angle"
 
-	// Style cells
+	// Line style cells
 	CellLineWeight  CellName = "LineWeight"
 	CellLineColor   CellName = "LineColor"
 	CellLinePattern CellName = "LinePattern"
-	CellFillForegnd CellName = "FillForegnd"
+	CellLineCap     CellName = "LineCap"
+	CellBeginArrow  CellName = "BeginArrow"
 	CellEndArrow    CellName = "EndArrow"
+	CellRounding    CellName = "Rounding"
+
+	// Fill style cells
+	CellFillForegnd      CellName = "FillForegnd"
+	CellFillBkgnd        CellName = "FillBkgnd"
+	CellFillPattern      CellName = "FillPattern"
+	CellFillForegndTrans CellName = "FillForegndTrans"
+	CellFillBkgndTrans   CellName = "FillBkgndTrans"
+
+	// Layer cell
 	CellLayerMember CellName = "LayerMember"
 
-	// Text pin cells
-	CellTxtPinX CellName = "TxtPinX"
-	CellTxtPinY CellName = "TxtPinY"
+	// Text block cells
+	CellTxtPinX    CellName = "TxtPinX"
+	CellTxtPinY    CellName = "TxtPinY"
+	CellTxtLocPinX CellName = "TxtLocPinX"
+	CellTxtLocPinY CellName = "TxtLocPinY"
+	CellTxtWidth   CellName = "TxtWidth"
+	CellTxtHeight  CellName = "TxtHeight"
+	CellTxtAngle   CellName = "TxtAngle"
+
+	// Protection cells
+	CellLockWidth  CellName = "LockWidth"
+	CellLockHeight CellName = "LockHeight"
+	CellLockMoveX  CellName = "LockMoveX"
+	CellLockMoveY  CellName = "LockMoveY"
+	CellLockDelete CellName = "LockDelete"
+	CellLockRotate CellName = "LockRotate"
+	CellLockAspect CellName = "LockAspect"
 
 	// Trigger cells
 	CellBegTrigger CellName = "BegTrigger"

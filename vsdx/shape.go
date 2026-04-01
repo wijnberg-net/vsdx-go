@@ -449,9 +449,148 @@ func (s *Shape) SetLinePattern(pattern int) {
 	s.SetCellValue(CellLinePattern, strconv.Itoa(pattern))
 }
 
+// Line cap constants for SetLineCap.
+const (
+	LineCapRound    = 0
+	LineCapSquare   = 1
+	LineCapExtended = 2
+)
+
+// SetLineCap sets the line cap style.
+// Use LineCapRound (0), LineCapSquare (1), or LineCapExtended (2).
+func (s *Shape) SetLineCap(cap int) {
+	s.SetCellValue(CellLineCap, strconv.Itoa(cap))
+}
+
+// SetBeginArrow sets the begin arrow style. Use 13 for standard arrow, 0 for none.
+func (s *Shape) SetBeginArrow(v int) {
+	s.SetCellValue(CellBeginArrow, strconv.Itoa(v))
+}
+
 // SetEndArrow sets the EndArrow cell value. Use 13 for standard arrow, 0 for none.
 func (s *Shape) SetEndArrow(v int) {
 	s.SetCellValue(CellEndArrow, strconv.Itoa(v))
+}
+
+// SetRounding sets the corner rounding radius in inches.
+func (s *Shape) SetRounding(radius float64) {
+	s.SetCellValue(CellRounding, fmtFloat(radius))
+}
+
+// --- Fill style ---
+
+// SetFillPattern sets the fill pattern. 0=transparent, 1=solid, 2-24=hatches.
+func (s *Shape) SetFillPattern(pattern int) {
+	s.SetCellValue(CellFillPattern, strconv.Itoa(pattern))
+}
+
+// SetFillTransparency sets the foreground fill transparency (0.0=opaque, 1.0=fully transparent).
+func (s *Shape) SetFillTransparency(v float64) {
+	s.SetCellValue(CellFillForegndTrans, fmtFloat(v))
+}
+
+// SetFillBkgndColor sets the background fill color.
+func (s *Shape) SetFillBkgndColor(v string) {
+	s.SetCellValue(CellFillBkgnd, v)
+}
+
+// SetFillBkgndTransparency sets the background fill transparency (0.0=opaque, 1.0=fully transparent).
+func (s *Shape) SetFillBkgndTransparency(v float64) {
+	s.SetCellValue(CellFillBkgndTrans, fmtFloat(v))
+}
+
+// --- Text block positioning ---
+
+// SetTxtPinX sets the X position of the text block's pin relative to the shape origin.
+func (s *Shape) SetTxtPinX(v float64) { s.SetCellValue(CellTxtPinX, fmtFloat(v)) }
+
+// SetTxtPinY sets the Y position of the text block's pin relative to the shape origin.
+func (s *Shape) SetTxtPinY(v float64) { s.SetCellValue(CellTxtPinY, fmtFloat(v)) }
+
+// SetTxtLocPinX sets the X local pin within the text block.
+func (s *Shape) SetTxtLocPinX(v float64) { s.SetCellValue(CellTxtLocPinX, fmtFloat(v)) }
+
+// SetTxtLocPinY sets the Y local pin within the text block.
+func (s *Shape) SetTxtLocPinY(v float64) { s.SetCellValue(CellTxtLocPinY, fmtFloat(v)) }
+
+// SetTxtWidth sets the width of the text block.
+func (s *Shape) SetTxtWidth(v float64) { s.SetCellValue(CellTxtWidth, fmtFloat(v)) }
+
+// SetTxtHeight sets the height of the text block.
+func (s *Shape) SetTxtHeight(v float64) { s.SetCellValue(CellTxtHeight, fmtFloat(v)) }
+
+// SetTxtAngle sets the rotation angle of the text block in radians.
+func (s *Shape) SetTxtAngle(v float64) { s.SetCellValue(CellTxtAngle, fmtFloat(v)) }
+
+// --- Protection ---
+
+func (s *Shape) setLock(cell CellName, locked bool) {
+	v := "0"
+	if locked {
+		v = "1"
+	}
+	s.ensureSectionCell("Protection", cell, v)
+}
+
+// SetLockMove locks or unlocks shape movement (both X and Y).
+func (s *Shape) SetLockMove(locked bool) {
+	s.setLock(CellLockMoveX, locked)
+	s.setLock(CellLockMoveY, locked)
+}
+
+// SetLockSize locks or unlocks shape resizing (both width and height).
+func (s *Shape) SetLockSize(locked bool) {
+	s.setLock(CellLockWidth, locked)
+	s.setLock(CellLockHeight, locked)
+}
+
+// SetLockDelete locks or unlocks shape deletion.
+func (s *Shape) SetLockDelete(locked bool) {
+	s.setLock(CellLockDelete, locked)
+}
+
+// SetLockRotate locks or unlocks shape rotation.
+func (s *Shape) SetLockRotate(locked bool) {
+	s.setLock(CellLockRotate, locked)
+}
+
+// SetLockAspect locks or unlocks the aspect ratio when resizing.
+func (s *Shape) SetLockAspect(locked bool) {
+	s.setLock(CellLockAspect, locked)
+}
+
+// --- User-defined cells ---
+
+// AddUserCell adds a user-defined cell to the shape.
+// User cells store custom metadata without appearing in the Shape Data pane.
+func (s *Shape) AddUserCell(name, value string) {
+	section := s.xml.FindElement("Section[@N='User']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "User")
+	}
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("N", name)
+	addCellXML(row, "Value", value, "")
+	addCellXML(row, "Prompt", "", "")
+}
+
+// UserCellValue returns the value of a user-defined cell, or "" if not found.
+func (s *Shape) UserCellValue(name string) string {
+	section := s.xml.FindElement("Section[@N='User']")
+	if section == nil {
+		return ""
+	}
+	row := section.FindElement("Row[@N='" + name + "']")
+	if row == nil {
+		return ""
+	}
+	cell := row.FindElement("Cell[@N='Value']")
+	if cell == nil {
+		return ""
+	}
+	return cell.SelectAttrValue("V", "")
 }
 
 // AddHyperlink adds a hyperlink to the shape.

@@ -3615,6 +3615,275 @@ func TestSetComment(t *testing.T) {
 	}
 }
 
+func TestFillTransparency(t *testing.T) {
+	vis, page, _ := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Create an OSPF area background
+	area := page.AddShape()
+	area.SetX(4.0)
+	area.SetY(6.0)
+	area.SetWidth(6.0)
+	area.SetHeight(4.0)
+	area.SetText("OSPF Area 0")
+	area.SetFillColor("#CCE5FF")
+	area.SetFillPattern(1) // solid
+	area.SetFillTransparency(0.5)
+	area.SetFillBkgndColor("#FFFFFF")
+	area.SetFillBkgndTransparency(0.8)
+
+	if area.CellValue(CellFillForegndTrans) != "0.5" {
+		t.Errorf("FillForegndTrans = %q, want '0.5'", area.CellValue(CellFillForegndTrans))
+	}
+	if area.CellValue(CellFillBkgndTrans) != "0.8" {
+		t.Errorf("FillBkgndTrans = %q, want '0.8'", area.CellValue(CellFillBkgndTrans))
+	}
+	if area.CellValue(CellFillPattern) != "1" {
+		t.Errorf("FillPattern = %q, want '1'", area.CellValue(CellFillPattern))
+	}
+	if area.CellValue(CellFillBkgnd) != "#FFFFFF" {
+		t.Errorf("FillBkgnd = %q, want '#FFFFFF'", area.CellValue(CellFillBkgnd))
+	}
+}
+
+func TestRounding(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	shapes[0].SetRounding(0.125) // 1/8 inch rounded corners
+	if shapes[0].CellValue(CellRounding) != "0.125" {
+		t.Errorf("Rounding = %q, want '0.125'", shapes[0].CellValue(CellRounding))
+	}
+}
+
+func TestBeginArrowAndLineCap(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Connect two shapes and style the connector
+	conn, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	// Bidirectional arrow
+	conn.SetBeginArrow(13)
+	conn.SetEndArrow(13)
+	conn.SetLineCap(LineCapRound)
+
+	if conn.CellValue(CellBeginArrow) != "13" {
+		t.Errorf("BeginArrow = %q, want '13'", conn.CellValue(CellBeginArrow))
+	}
+	if conn.CellValue(CellEndArrow) != "13" {
+		t.Errorf("EndArrow = %q, want '13'", conn.CellValue(CellEndArrow))
+	}
+	if conn.CellValue(CellLineCap) != "0" {
+		t.Errorf("LineCap = %q, want '0'", conn.CellValue(CellLineCap))
+	}
+}
+
+func TestTextBlockPositioning(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Connect and position label above the connector
+	conn, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+	conn.SetText("ge-0/0/0 — 10Gbps")
+
+	// Position text block above the line
+	conn.SetTxtPinX(1.0)
+	conn.SetTxtPinY(0.2)
+	conn.SetTxtWidth(2.0)
+	conn.SetTxtHeight(0.25)
+	conn.SetTxtLocPinX(1.0)
+	conn.SetTxtLocPinY(0.0)
+	conn.SetTxtAngle(0)
+
+	if conn.CellValue(CellTxtWidth) != "2" {
+		t.Errorf("TxtWidth = %q, want '2'", conn.CellValue(CellTxtWidth))
+	}
+	if conn.CellValue(CellTxtHeight) != "0.25" {
+		t.Errorf("TxtHeight = %q, want '0.25'", conn.CellValue(CellTxtHeight))
+	}
+	if conn.CellValue(CellTxtAngle) != "0" {
+		t.Errorf("TxtAngle = %q, want '0'", conn.CellValue(CellTxtAngle))
+	}
+}
+
+func TestProtection(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	r1 := shapes[0]
+
+	// Lock movement and deletion
+	r1.SetLockMove(true)
+	r1.SetLockDelete(true)
+	r1.SetLockSize(true)
+	r1.SetLockRotate(true)
+	r1.SetLockAspect(true)
+
+	// Verify Protection section exists
+	protSection := r1.XML().FindElement("Section[@N='Protection']")
+	if protSection == nil {
+		t.Fatal("Protection section should exist")
+	}
+
+	// Check individual cells
+	checkCell := func(name, want string) {
+		cell := protSection.FindElement("Row/Cell[@N='" + name + "']")
+		if cell == nil {
+			t.Errorf("cell %s not found", name)
+			return
+		}
+		if cell.SelectAttrValue("V", "") != want {
+			t.Errorf("%s = %q, want %q", name, cell.SelectAttrValue("V", ""), want)
+		}
+	}
+	checkCell("LockMoveX", "1")
+	checkCell("LockMoveY", "1")
+	checkCell("LockDelete", "1")
+	checkCell("LockWidth", "1")
+	checkCell("LockHeight", "1")
+	checkCell("LockRotate", "1")
+	checkCell("LockAspect", "1")
+
+	// Unlock move
+	r1.SetLockMove(false)
+	checkCell("LockMoveX", "0")
+	checkCell("LockMoveY", "0")
+}
+
+func TestUserDefinedCells(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	r1 := shapes[0]
+
+	// Add user cells for internal metadata
+	r1.AddUserCell("osprey_id", "dev-12345")
+	r1.AddUserCell("snmp_community", "public")
+	r1.AddUserCell("port_count", "48")
+
+	// Read back
+	if r1.UserCellValue("osprey_id") != "dev-12345" {
+		t.Errorf("osprey_id = %q, want 'dev-12345'", r1.UserCellValue("osprey_id"))
+	}
+	if r1.UserCellValue("snmp_community") != "public" {
+		t.Errorf("snmp_community = %q, want 'public'", r1.UserCellValue("snmp_community"))
+	}
+	if r1.UserCellValue("port_count") != "48" {
+		t.Errorf("port_count = %q, want '48'", r1.UserCellValue("port_count"))
+	}
+
+	// Not found
+	if r1.UserCellValue("nonexistent") != "" {
+		t.Error("nonexistent user cell should return empty string")
+	}
+
+	// Verify User section structure
+	section := r1.XML().FindElement("Section[@N='User']")
+	if section == nil {
+		t.Fatal("User section should exist")
+	}
+	rows := section.SelectElements("Row")
+	if len(rows) != 3 {
+		t.Fatalf("user cells = %d, want 3", len(rows))
+	}
+}
+
+func TestNetworkFeaturesRoundTrip(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	r1, sw := shapes[0], shapes[2]
+
+	// Apply all new features
+	r1.SetRounding(0.1)
+	r1.SetFillColor("#E8F4FD")
+	r1.SetFillPattern(1)
+	r1.SetFillTransparency(0.0)
+	r1.SetLockMove(true)
+	r1.SetLockDelete(true)
+	r1.AddUserCell("device_type", "router")
+
+	sw.SetFillColor("#E8F8E8")
+	sw.AddUserCell("device_type", "switch")
+
+	// Area background
+	area := page.AddShape()
+	area.SetX(4.0)
+	area.SetY(6.0)
+	area.SetWidth(8.0)
+	area.SetHeight(6.0)
+	area.SetFillColor("#CCE5FF")
+	area.SetFillTransparency(0.7)
+	area.SetText("Area 0")
+
+	// Connector with arrows and label positioning
+	conn, _ := vis.ConnectShapes(page, r1, sw)
+	conn.SetBeginArrow(13)
+	conn.SetEndArrow(13)
+	conn.SetLineCap(LineCapRound)
+	conn.SetLinePattern(LinePatternDash)
+	conn.SetText("10.0.0.0/30")
+	conn.SetTxtWidth(1.5)
+
+	// Save and reopen
+	data, err := vis.SaveVsdxBytes()
+	if err != nil {
+		t.Fatalf("SaveVsdxBytes: %v", err)
+	}
+	vis2, err := OpenBytes(data)
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	defer vis2.Close() //nolint:errcheck
+
+	page2 := vis2.GetPage(0)
+
+	// Verify rounding
+	r1v2 := page2.FindShapeByText("router-1")
+	if r1v2 == nil {
+		t.Fatal("router-1 not found")
+	}
+	if r1v2.CellValue(CellRounding) != "0.1" {
+		t.Errorf("Rounding after reopen = %q, want '0.1'", r1v2.CellValue(CellRounding))
+	}
+
+	// Verify fill transparency
+	if r1v2.CellValue(CellFillForegndTrans) != "0" {
+		t.Errorf("FillForegndTrans after reopen = %q, want '0'", r1v2.CellValue(CellFillForegndTrans))
+	}
+
+	// Verify protection
+	protSection := r1v2.XML().FindElement("Section[@N='Protection']")
+	if protSection == nil {
+		t.Error("Protection section missing after reopen")
+	}
+
+	// Verify user cells
+	if r1v2.UserCellValue("device_type") != "router" {
+		t.Errorf("user cell after reopen = %q, want 'router'", r1v2.UserCellValue("device_type"))
+	}
+
+	// Verify connector arrows
+	connShapes := page2.FindShapesByText("10.0.0.0/30")
+	if len(connShapes) == 0 {
+		t.Fatal("connector not found")
+	}
+	connV2 := connShapes[0]
+	if connV2.CellValue(CellBeginArrow) != "13" {
+		t.Errorf("BeginArrow after reopen = %q, want '13'", connV2.CellValue(CellBeginArrow))
+	}
+	if connV2.CellValue(CellLineCap) != "0" {
+		t.Errorf("LineCap after reopen = %q, want '0'", connV2.CellValue(CellLineCap))
+	}
+}
+
 func TestFormattingRoundTrip(t *testing.T) {
 	vis, page, _ := buildNetworkTopology(t)
 	defer vis.Close() //nolint:errcheck
