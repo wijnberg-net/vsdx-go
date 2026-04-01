@@ -720,9 +720,15 @@ func (s *Shape) AddGeometry() *Geometry {
 }
 
 // AddGeometryRect adds a rectangular geometry using relative coordinates (0-1).
-// The rectangle fills the shape's Width x Height.
+// The rectangle fills the shape's Width x Height. Sets NoFill=0 (enable fill)
+// and NoLine=1 (hide geometry border) so the shape's FillPattern/FillForegnd
+// cells control the appearance.
 func (s *Shape) AddGeometryRect() *Geometry {
 	g := s.AddGeometry()
+	// Explicit NoFill=0 is required — without it, Visio may inherit NoFill
+	// from the stylesheet/theme and suppress the fill entirely.
+	addCellXML(g.xml, "NoFill", "0", "")
+	addCellXML(g.xml, "NoLine", "1", "")
 	g.AddRelMoveTo(0, 0)
 	g.AddRelLineTo(1, 0)
 	g.AddRelLineTo(1, 1)

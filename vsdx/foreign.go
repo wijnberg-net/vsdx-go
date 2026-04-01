@@ -125,8 +125,10 @@ func (p *Page) AddShape() *Shape {
 		shapesElem = p.xml.Root().CreateElement("Shapes")
 	}
 
-	// Assign next ID
-	p.SetMaxIDs()
+	// Assign next ID. Only scan on first call; after that, just increment.
+	if p.MaxID == 0 {
+		p.SetMaxIDs()
+	}
 	p.MaxID++
 	id := strconv.Itoa(p.MaxID)
 
@@ -202,8 +204,10 @@ func (p *Page) GroupShapes(shapes []*Shape, padding float64) *Shape {
 	centerX := (minX + maxX) / 2
 	centerY := (minY + maxY) / 2
 
-	// Allocate next shape ID.
-	p.SetMaxIDs()
+	// Allocate next shape ID. Only scan on first call.
+	if p.MaxID == 0 {
+		p.SetMaxIDs()
+	}
 	p.MaxID++
 	groupID := strconv.Itoa(p.MaxID)
 
@@ -211,9 +215,9 @@ func (p *Page) GroupShapes(shapes []*Shape, padding float64) *Shape {
 	groupElem := shapesElem.CreateElement("Shape")
 	groupElem.CreateAttr("ID", groupID)
 	groupElem.CreateAttr("Type", "Group")
-	groupElem.CreateAttr("LineStyle", "3")
-	groupElem.CreateAttr("FillStyle", "3")
-	groupElem.CreateAttr("TextStyle", "3")
+	groupElem.CreateAttr("LineStyle", "0")
+	groupElem.CreateAttr("FillStyle", "0")
+	groupElem.CreateAttr("TextStyle", "0")
 
 	// Position and size cells.
 	addCellXML(groupElem, CellPinX, fmtFloat(centerX), "")

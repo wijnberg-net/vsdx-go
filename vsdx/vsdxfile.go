@@ -37,6 +37,7 @@ type VisioFile struct {
 	documentXMLRels *etree.Document
 	mastersXML      *etree.Element // root element of masters.xml
 	masterIndex     map[string]*Page
+	cachedMedia     *Media
 	debug           bool //nolint:unused // reserved for future debug logging
 }
 
@@ -110,6 +111,10 @@ func OpenBytes(data []byte) (*VisioFile, error) {
 // Close releases resources associated with the VisioFile.
 // It implements the io.Closer interface.
 func (v *VisioFile) Close() error {
+	if v.cachedMedia != nil {
+		v.cachedMedia.Close()
+		v.cachedMedia = nil
+	}
 	v.ZipFileContents = nil
 	return nil
 }
@@ -544,7 +549,9 @@ func (v *VisioFile) CopyPage(page *Page, index int, name string) (*Page, error) 
 // Returns the new shape element.
 func (v *VisioFile) CopyShape(shape *etree.Element, page *Page) *etree.Element {
 	newShape := shape.Copy()
-	page.SetMaxIDs()
+	if page.MaxID == 0 {
+		page.SetMaxIDs()
+	}
 
 	// Find or create Shapes container
 	shapesTag := page.xml.Root().SelectElement("Shapes")
@@ -788,11 +795,15 @@ func (v *VisioFile) createPage(pageContentXML string, pageName string, pageElem 
 // ConnectShapes creates a new connector shape between fromShape and toShape on the given page.
 // Returns the connector Shape, or an error.
 func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape, error) {
-	media, err := NewMedia()
-	if err != nil {
-		return nil, fmt.Errorf("loading media template: %w", err)
+	// Cache media template — opening embedded ZIP per call is expensive at scale.
+	if v.cachedMedia == nil {
+		m, err := NewMedia()
+		if err != nil {
+			return nil, fmt.Errorf("loading media template: %w", err)
+		}
+		v.cachedMedia = m
 	}
-	defer media.Close() //nolint:errcheck // best-effort close of media template
+	media := v.cachedMedia
 
 	// Copy straight connector template to destination page
 	connectorTemplate := media.StraightConnector()
