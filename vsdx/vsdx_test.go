@@ -28,6 +28,7 @@ func TestOpenInvalidFileType(t *testing.T) {
 	_, err := Open("test.txt")
 	if err == nil {
 		t.Fatal("expected error for invalid file type")
+		return
 	}
 }
 
@@ -38,7 +39,7 @@ func TestOpenRelPath(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Open(%s): %v", filename, err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			for _, page := range vis.Pages {
 				t.Logf("Page: %s", page.Name())
 			}
@@ -51,7 +52,7 @@ func TestLoadZipFileContents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	if len(vis.ZipFileContents) == 0 {
 		t.Fatal("expected non-empty zip file contents")
@@ -79,10 +80,11 @@ func TestGetPage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			if page == nil {
 				t.Fatal("expected page 0")
+				return
 			}
 			if page.Name() != tt.pageName {
 				t.Errorf("page name = %q, want %q", page.Name(), tt.pageName)
@@ -109,7 +111,7 @@ func TestGetPageName(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.Pages[tt.pageIndex]
 			if page.Name() != tt.pageName {
 				t.Errorf("page name = %q, want %q", page.Name(), tt.pageName)
@@ -135,7 +137,7 @@ func TestGetPageSize(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.Pages[tt.pageIndex]
 			if page.Width() != tt.width {
 				t.Errorf("width = %v, want %v", page.Width(), tt.width)
@@ -164,7 +166,7 @@ func TestGetPageChildShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shapes := page.ChildShapes()
 			if len(shapes) != tt.childCount {
@@ -189,7 +191,7 @@ func TestGetPageAllShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			all := page.AllShapes()
 			if len(all) != tt.allCount {
@@ -214,7 +216,7 @@ func TestXMLFindAllShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			elements := page.XML().Root().FindElements(".//Shape")
 			if len(elements) != tt.shapeElements {
@@ -239,7 +241,7 @@ func TestXMLFindAllGroupShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			var count int
 			for _, elem := range page.XML().Root().FindElements(".//Shape") {
@@ -274,11 +276,12 @@ func TestGetShapeText(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			if shape.Text() != tt.expectedText {
 				t.Errorf("text = %q, want %q", shape.Text(), tt.expectedText)
@@ -301,11 +304,12 @@ func TestGetShapeWithText(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shape := page.FindShapeByText("{{date}}")
 			if shape == nil {
 				t.Fatal("shape not found")
+				return
 			}
 			if shape.ID != tt.shapeID {
 				t.Errorf("shape ID = %q, want %q", shape.ID, tt.shapeID)
@@ -334,11 +338,12 @@ func TestGetShapeChildShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			if len(shape.ChildShapes()) != tt.childCount {
 				t.Errorf("child shapes = %d, want %d", len(shape.ChildShapes()), tt.childCount)
@@ -365,11 +370,12 @@ func TestGetShapeAllShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			if len(shape.AllShapes()) != tt.allCount {
 				t.Errorf("all shapes = %d, want %d", len(shape.AllShapes()), tt.allCount)
@@ -394,7 +400,7 @@ func TestShapeLocations(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shapes := page.ChildShapes()
 			locations := ""
@@ -416,7 +422,7 @@ func TestShapeCenter(t *testing.T) {
 		centerY  float64
 	}{
 		{"test1.vsdx", "1", 1.332677148526936, 10.65551182326173},
-		{"test2.vsdx", "2", 1.082677148526936, 0.7874015625650443},   // group shape
+		{"test2.vsdx", "2", 1.082677148526936, 0.7874015625650443},  // group shape
 		{"test2.vsdx", "16", 1.6903102768832179, 8.188976116607332}, // line
 	}
 	for _, tt := range tests {
@@ -426,11 +432,12 @@ func TestShapeCenter(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.GetPage(0)
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			cx, cy := shape.CenterXY()
 			if cx != tt.centerX || cy != tt.centerY {
@@ -465,7 +472,7 @@ func TestPageID(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.Pages[tt.pageIndex]
 			if page.PageID() != tt.expectedPageID {
 				t.Errorf("page ID = %q, want %q", page.PageID(), tt.expectedPageID)
@@ -493,7 +500,7 @@ func TestMasterPageID(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			if tt.masterIndex >= len(vis.MasterPages) {
 				t.Fatalf("master index %d out of range (have %d)", tt.masterIndex, len(vis.MasterPages))
 			}
@@ -512,7 +519,7 @@ func TestPageHasPageSheetXML(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			for i, page := range vis.Pages {
 				if page.pagesheetXML() == nil {
 					t.Errorf("page %d has nil pagesheet XML", i)
@@ -529,7 +536,7 @@ func TestMasterPageHasSheetXML(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			for _, page := range vis.MasterPages {
 				if page.pagesheetXML() == nil {
 					t.Errorf("master page %s (ID=%s) has nil pagesheet XML", page.Name(), page.PageID())
@@ -561,7 +568,7 @@ func TestPageAllShapesIDs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.Pages[tt.pageIndex]
 			all := page.AllShapes()
 			var ids []string
@@ -587,7 +594,7 @@ func TestFindPageConnects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	connects := page.Connects()
@@ -622,7 +629,7 @@ func TestFindConnectedShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	for _, tt := range tests {
@@ -630,6 +637,7 @@ func TestFindConnectedShapes(t *testing.T) {
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			var ids []string
 			for _, s := range shape.ConnectedShapes() {
@@ -665,7 +673,7 @@ func TestFindConnectedShapeRelationships(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	for _, tt := range tests {
@@ -673,6 +681,7 @@ func TestFindConnectedShapeRelationships(t *testing.T) {
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			var fromIDs, toIDs, fromRels, toRels []string
 			for _, c := range shape.Connects() {
@@ -733,11 +742,12 @@ func TestGetShapeDataProperties(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 
 			shape := vis.Pages[tt.pageIndex].FindShapeByText(tt.shapeName)
 			if shape == nil {
 				t.Fatalf("shape %q not found", tt.shapeName)
+				return
 			}
 
 			props := shape.DataProperties()
@@ -780,11 +790,12 @@ func TestFindShapeByPropertyLabel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 
 			shape := vis.Pages[tt.pageIndex].FindShapeByPropertyLabel(tt.propertyLabel)
 			if shape == nil {
 				t.Fatalf("shape with property %q not found", tt.propertyLabel)
+				return
 			}
 
 			text := trimNewlines(shape.Text())
@@ -814,7 +825,7 @@ func TestFindShapesByPropertyLabelValue(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 
 			shapes := vis.Pages[tt.pageIndex].FindShapesByPropertyLabelValue(tt.propertyLabel, tt.propertyValue)
 			if len(shapes) != len(tt.expectedShapeNames) {
@@ -850,14 +861,16 @@ func TestGetShapeGeometry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.Pages[tt.pageIndex]
 			shape := page.FindShapeByText(tt.shapeText)
 			if shape == nil {
 				t.Fatalf("shape %q not found", tt.shapeText)
+				return
 			}
 			if shape.Geometry == nil {
 				t.Fatal("shape has no geometry")
+				return
 			}
 
 			// Build simplified geometry string
@@ -901,7 +914,7 @@ func TestGetShapeAngle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	for _, tt := range tests {
@@ -909,6 +922,7 @@ func TestGetShapeAngle(t *testing.T) {
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 			if math.Abs(shape.Angle()-tt.expectedAngle) >= 0.01 {
 				t.Errorf("angle = %v, want ~%v", shape.Angle(), tt.expectedAngle)
@@ -937,11 +951,12 @@ func TestShapeBounds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 			page := vis.Pages[tt.pageIndex]
 			shape := page.FindShapeByText(tt.shapeText)
 			if shape == nil {
 				t.Fatalf("shape %q not found", tt.shapeText)
+				return
 			}
 			bx, by, ex, ey := shape.Bounds()
 			bounds := []string{
@@ -975,7 +990,7 @@ func TestGetShapeColors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	for _, tt := range tests {
 		name := fmt.Sprintf("page%d_%s_%s", tt.pageIndex, tt.shapeText, tt.colorParam)
@@ -983,6 +998,7 @@ func TestGetShapeColors(t *testing.T) {
 			shape := vis.Pages[tt.pageIndex].FindShapeByText(tt.shapeText)
 			if shape == nil {
 				t.Fatalf("shape %q not found", tt.shapeText)
+				return
 			}
 
 			var color string
@@ -1009,12 +1025,13 @@ func TestGetShapeMasterPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	childShape := vis.GetPage(0).ChildShapes()[0]
 	masterPage := childShape.MasterPage()
 	if masterPage == nil {
 		t.Fatal("expected master page")
+		return
 	}
 	expectedName := "AWS Step Functions workflow "
 	if masterPage.Name() != expectedName {
@@ -1031,19 +1048,19 @@ func TestSaveAndReopen(t *testing.T) {
 	}
 
 	outFile := filepath.Join(testDir, "out", "test1_go_save.vsdx")
-	os.MkdirAll(filepath.Join(testDir, "out"), 0755)
+	_ = os.MkdirAll(filepath.Join(testDir, "out"), 0755)
 
 	if err := vis.SaveVsdx(outFile); err != nil {
 		t.Fatalf("SaveVsdx: %v", err)
 	}
-	vis.Close()
+	_ = vis.Close()
 
 	// Re-open
 	vis2, err := Open(outFile)
 	if err != nil {
 		t.Fatalf("re-open: %v", err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	if len(vis2.Pages) != 3 {
 		t.Errorf("pages = %d, want 3", len(vis2.Pages))
@@ -1060,11 +1077,12 @@ func TestShapeValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 	// ID attribute should be accessible via ShapeValue
 	if shape.ShapeValue("ID") != shape.ID {
@@ -1081,7 +1099,7 @@ func TestFindShapesByID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	// Shape ID "1" should exist
@@ -1101,7 +1119,7 @@ func TestFindShapesByMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	// Shapes 1 and 3 both have MasterPageID="1"
@@ -1126,7 +1144,7 @@ func TestFindShapesByRegex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 
@@ -1160,7 +1178,7 @@ func TestFindShapesWithSameMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	// Get first shape that has a master
@@ -1197,7 +1215,7 @@ func TestGetConnectorsBetween(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 
@@ -1225,7 +1243,7 @@ func TestConnectString(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	connects := page.Connects()
@@ -1249,11 +1267,12 @@ func TestSetCellValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	// Set existing cell value
@@ -1281,11 +1300,12 @@ func TestSetCellFormula(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	// Set formula on new cell
@@ -1300,11 +1320,12 @@ func TestSetPositionAndSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.SetX(3.0)
@@ -1335,11 +1356,12 @@ func TestSetStyleProperties(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.Pages[0].FindShapeByText("Line Color")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.SetLineColor("#00ff00")
@@ -1363,11 +1385,12 @@ func TestSetTextColor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.Pages[0].FindShapeByText("Text Color")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.SetTextColor("#0000ff")
@@ -1381,11 +1404,12 @@ func TestSetEndArrow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.SetEndArrow(13)
@@ -1404,11 +1428,12 @@ func TestSetStyleIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.SetLineStyleID("5")
@@ -1431,11 +1456,12 @@ func TestSetText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.SetText("New Text")
@@ -1449,11 +1475,12 @@ func TestMoveShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	origX := shape.X()
@@ -1473,7 +1500,7 @@ func TestRemoveShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	origCount := len(page.ChildShapes())
@@ -1481,6 +1508,7 @@ func TestRemoveShape(t *testing.T) {
 	shape := page.FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 	shape.Remove()
 
@@ -1500,11 +1528,12 @@ func TestFindReplace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	shape.FindReplace("Shape", "New")
@@ -1518,11 +1547,12 @@ func TestApplyTextFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("{{date}}")
 	if shape == nil {
 		t.Fatal("shape with {{date}} not found")
+		return
 	}
 
 	shape.ApplyTextFilter(map[string]string{"date": "2024-01-01"})
@@ -1539,12 +1569,13 @@ func TestRelativeBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	shape := page.FindShapeByText("Sub-shape 2")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	rbx, rby, rex, rey := shape.RelativeBounds()
@@ -1565,7 +1596,7 @@ func TestSetPageName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	page.SetName("NewPageName")
@@ -1579,7 +1610,7 @@ func TestSetPageSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	page.SetWidth(10.0)
@@ -1597,7 +1628,7 @@ func TestPageFindReplace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	page.FindReplace("Shape Text", "Replaced Text")
@@ -1613,7 +1644,7 @@ func TestPageApplyTextContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.GetPage(0)
 	page.ApplyTextContext(map[string]string{"date": "2024-06-15"})
@@ -1636,11 +1667,12 @@ func TestGeometryMove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByID("5")
 	if shape == nil || shape.Geometry == nil {
 		t.Fatal("shape or geometry not found")
+		return
 	}
 
 	// Get original MoveTo position
@@ -1673,11 +1705,12 @@ func TestGeometryRowSetters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil || shape.Geometry == nil {
 		t.Fatal("shape or geometry not found")
+		return
 	}
 
 	for _, row := range shape.Geometry.Rows {
@@ -1700,11 +1733,12 @@ func TestDataPropertySetAttribute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	shape := vis.GetPage(0).FindShapeByText("Shape Text")
 	if shape == nil {
 		t.Fatal("shape not found")
+		return
 	}
 
 	props := shape.DataProperties()
@@ -1762,18 +1796,18 @@ func TestEditAndSaveRoundTrip(t *testing.T) {
 
 	// Save
 	outFile := filepath.Join(testDir, "out", "test1_edited.vsdx")
-	os.MkdirAll(filepath.Join(testDir, "out"), 0755)
+	_ = os.MkdirAll(filepath.Join(testDir, "out"), 0755)
 	if err := vis.SaveVsdx(outFile); err != nil {
 		t.Fatalf("SaveVsdx: %v", err)
 	}
-	vis.Close()
+	_ = vis.Close()
 
 	// Re-open and verify
 	vis2, err := Open(outFile)
 	if err != nil {
 		t.Fatalf("re-open: %v", err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	if vis2.GetPage(0).Name() != "EditedPage" {
 		t.Errorf("page name = %q, want 'EditedPage'", vis2.GetPage(0).Name())
@@ -1782,6 +1816,7 @@ func TestEditAndSaveRoundTrip(t *testing.T) {
 	editedShape := vis2.GetPage(0).FindShapeByText("Edited Shape Text")
 	if editedShape == nil {
 		t.Fatal("edited shape not found after save/reload")
+		return
 	}
 	if editedShape.X() != 5.0 {
 		t.Errorf("X() = %v, want 5.0", editedShape.X())
@@ -1798,7 +1833,7 @@ func TestRemovePageByIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origCount := len(vis.Pages)
 	if origCount < 2 {
@@ -1824,7 +1859,7 @@ func TestRemovePageByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origCount := len(vis.Pages)
 	pageName := vis.Pages[1].Name()
@@ -1846,7 +1881,7 @@ func TestRemovePageAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origCount := len(vis.Pages)
 	vis.RemovePageByIndex(0)
@@ -1861,7 +1896,7 @@ func TestRemovePageAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	if len(vis2.Pages) != origCount-1 {
 		t.Errorf("reopened page count = %d, want %d", len(vis2.Pages), origCount-1)
@@ -1873,7 +1908,7 @@ func TestAddPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origCount := len(vis.Pages)
 	newPage, err := vis.AddPage("TestNewPage")
@@ -1882,6 +1917,7 @@ func TestAddPage(t *testing.T) {
 	}
 	if newPage == nil {
 		t.Fatal("AddPage returned nil")
+		return
 	}
 	if newPage.Name() != "TestNewPage" {
 		t.Errorf("name = %q, want %q", newPage.Name(), "TestNewPage")
@@ -1900,7 +1936,7 @@ func TestAddPageAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origCount := len(vis.Pages)
 	newPage, err := vis.AddPageAt(0, "FirstPage")
@@ -1909,6 +1945,7 @@ func TestAddPageAt(t *testing.T) {
 	}
 	if newPage == nil {
 		t.Fatal("AddPageAt returned nil")
+		return
 	}
 	if len(vis.Pages) != origCount+1 {
 		t.Errorf("page count = %d, want %d", len(vis.Pages), origCount+1)
@@ -1926,7 +1963,7 @@ func TestAddPageDuplicateName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	existingName := vis.Pages[0].Name()
 	newPage, err := vis.AddPage(existingName)
@@ -1947,7 +1984,7 @@ func TestAddPageAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	if _, err := vis.AddPage("NewSavedPage"); err != nil {
 		t.Fatalf("AddPage: %v", err)
@@ -1963,7 +2000,7 @@ func TestAddPageAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	found := false
 	for _, p := range vis2.Pages {
@@ -1982,7 +2019,7 @@ func TestCopyPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origPage := vis.Pages[0]
 	origShapeCount := len(origPage.ChildShapes())
@@ -1994,6 +2031,7 @@ func TestCopyPage(t *testing.T) {
 	}
 	if newPage == nil {
 		t.Fatal("CopyPage returned nil")
+		return
 	}
 	if newPage.Name() != "CopiedPage" {
 		t.Errorf("name = %q, want %q", newPage.Name(), "CopiedPage")
@@ -2014,7 +2052,7 @@ func TestCopyPageAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	origPage := vis.Pages[0]
 	if _, err := vis.CopyPage(origPage, int(PageLast), "CopyTest"); err != nil {
@@ -2031,7 +2069,7 @@ func TestCopyPageAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	found := false
 	for _, p := range vis2.Pages {
@@ -2054,7 +2092,7 @@ func TestCopyShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	srcPage := vis.Pages[0]
 	srcShapes := srcPage.ChildShapes()
@@ -2068,6 +2106,7 @@ func TestCopyShape(t *testing.T) {
 	newShapeElem := vis.CopyShape(srcShapes[0].XML(), srcPage)
 	if newShapeElem == nil {
 		t.Fatal("CopyShape returned nil")
+		return
 	}
 
 	// Re-read page to get updated shapes
@@ -2089,7 +2128,7 @@ func TestCopyShapeAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	srcPage := vis.Pages[0]
 	srcShapes := srcPage.ChildShapes()
@@ -2114,11 +2153,12 @@ func TestCopyShapeAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	dstPage := vis2.GetPageByName("ShapeCopyDst")
 	if dstPage == nil {
 		t.Fatal("destination page not found")
+		return
 	}
 	if len(dstPage.ChildShapes()) != 1 {
 		t.Errorf("expected 1 shape on destination page, got %d", len(dstPage.ChildShapes()))
@@ -2136,7 +2176,7 @@ func TestOpenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	if len(vis.Pages) == 0 {
 		t.Fatal("expected pages")
@@ -2151,7 +2191,7 @@ func TestNewMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer media.Close()
+	defer media.Close() //nolint:errcheck
 
 	if sc := media.StraightConnector(); sc == nil {
 		t.Error("straight connector not found")
@@ -2177,7 +2217,7 @@ func TestSetStartAndFinish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.Pages[0]
 	// Find a connector shape (one with BeginX)
@@ -2217,7 +2257,7 @@ func TestConnectShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.Pages[0]
 	shapes := page.ChildShapes()
@@ -2234,6 +2274,7 @@ func TestConnectShapes(t *testing.T) {
 	}
 	if connectorShape == nil {
 		t.Fatal("ConnectShapes returned nil")
+		return
 	}
 
 	// Check connector has BeginX/Y and EndX/Y
@@ -2268,7 +2309,7 @@ func TestConnectShapesAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	page := vis.Pages[0]
 	shapes := page.ChildShapes()
@@ -2291,7 +2332,7 @@ func TestConnectShapesAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	page2 := vis2.Pages[0]
 	connects := page2.Connects()
@@ -2312,7 +2353,7 @@ func TestRenderTemplateBasicTextReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	context := map[string]any{
 		"date":     "2024-01-15",
@@ -2335,7 +2376,7 @@ func TestRenderTemplateCalc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	context := map[string]any{
 		"date":     "2024-01-15",
@@ -2369,7 +2410,7 @@ func TestRenderTemplateShowIfShapes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 
 			context := map[string]any{
 				"date":     "now",
@@ -2393,7 +2434,7 @@ func TestRenderTemplateForLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	context := map[string]any{
 		"date":      "2024-01-15",
@@ -2423,7 +2464,7 @@ func TestRenderTemplateForLoopStrings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	context := map[string]any{
 		"date":      "2024-01-15",
@@ -2457,7 +2498,7 @@ func TestRenderTemplatePageShowIf(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 
 			context := map[string]any{"show": tt.show}
 			vis.RenderTemplate(context)
@@ -2486,8 +2527,8 @@ func TestRenderTemplateSetSelf(t *testing.T) {
 		shapeID   string
 		expectedX float64
 	}{
-		{1, "1", 2.0},  // {% set self.x=2.0 %}
-		{2, "2", 4.0},  // {% set self.x=n*2 %} with n=2
+		{1, "1", 2.0}, // {% set self.x=2.0 %}
+		{2, "2", 4.0}, // {% set self.x=n*2 %} with n=2
 	}
 
 	for _, tt := range tests {
@@ -2496,7 +2537,7 @@ func TestRenderTemplateSetSelf(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer vis.Close()
+			defer vis.Close() //nolint:errcheck //nolint:errcheck
 
 			context := map[string]any{"n": tt.n}
 			vis.RenderTemplate(context)
@@ -2505,6 +2546,7 @@ func TestRenderTemplateSetSelf(t *testing.T) {
 			shape := page.FindShapeByID(tt.shapeID)
 			if shape == nil {
 				t.Fatalf("shape %s not found", tt.shapeID)
+				return
 			}
 
 			if shape.X() != tt.expectedX {
@@ -2519,7 +2561,7 @@ func TestRenderTemplateSetSelfText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	context := map[string]any{"n": 1}
 	vis.RenderTemplate(context)
@@ -2528,6 +2570,7 @@ func TestRenderTemplateSetSelfText(t *testing.T) {
 	shape := page.FindShapeByID("1")
 	if shape == nil {
 		t.Fatal("shape 1 not found")
+		return
 	}
 
 	text := shape.Text()
@@ -2545,7 +2588,7 @@ func TestRenderTemplateAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis.Close()
+	defer vis.Close() //nolint:errcheck
 
 	context := map[string]any{
 		"date":     "2024-01-15",
@@ -2565,7 +2608,7 @@ func TestRenderTemplateAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer vis2.Close()
+	defer vis2.Close() //nolint:errcheck
 
 	page := vis2.Pages[0]
 	if s := page.FindShapeByText("SaveTest"); s == nil {
@@ -2629,6 +2672,7 @@ func TestNewVisioFileDiff(t *testing.T) {
 			}
 			if fd == nil {
 				t.Fatal("expected non-nil VisioFileDiff")
+				return
 			}
 
 			// Should have common members

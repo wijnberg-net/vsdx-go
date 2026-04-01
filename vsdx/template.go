@@ -9,9 +9,9 @@ import (
 
 // expression evaluation regexes
 var (
-	reForLoop    = regexp.MustCompile(`{%\s*for\s+(\w+)\s+in\s+(\w+)\s*%}`)
-	reShowIf     = regexp.MustCompile(`{%\s*showif\s+(.*?)\s*%}`)
-	reSetSelf    = regexp.MustCompile(`{%\s*set\s+self\.(\w+)\s*=\s*(.*?)\s*%}`)
+	reForLoop     = regexp.MustCompile(`{%\s*for\s+(\w+)\s+in\s+(\w+)\s*%}`)
+	reShowIf      = regexp.MustCompile(`{%\s*showif\s+(.*?)\s*%}`)
+	reSetSelf     = regexp.MustCompile(`{%\s*set\s+self\.(\w+)\s*=\s*(.*?)\s*%}`)
 	rePlaceholder = regexp.MustCompile(`\{\{\s*(.*?)\s*\}\}`)
 )
 

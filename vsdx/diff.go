@@ -154,7 +154,7 @@ func extractFileData(filepath string) (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck // best-effort close of ZIP reader
 
 	contents := make(map[string][]string)
 	for _, f := range r.File {
@@ -166,7 +166,7 @@ func extractFileData(filepath string) (map[string][]string, error) {
 			continue
 		}
 		data, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			contents[f.Name] = []string{"Unable to read file."}
 			continue

@@ -1,5 +1,0 @@
-Jinja2
-deprecation
-Sphinx
-sphinx-rtd-theme
-pytest

@@ -71,6 +71,8 @@ vsdx-go/
 │   │── # Features
 │   ├── template.go             # RenderTemplate: Jinja2-style directives (490 lines)
 │   ├── diff.go                 # VisioFileDiff: compare two .vsdx files (241 lines)
+│   ├── foreign.go              # Foreign shapes: embedded images, shape creation, grouping, data properties (421 lines)
+│   ├── svg.go                  # SVG rendering: Visio geometry to SVG path conversion, brand color detection, EMF conversion (893 lines)
 │   ├── media.go                # Media: embedded template shapes for connectors (67 lines)
 │   ├── formula.go              # CalcValue: formula evaluation (35 lines)
 │   │
@@ -81,7 +83,9 @@ vsdx-go/
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   └── vsdx_test.go            # 95 test cases (2780 lines)
+│   ├── vsdx_test.go            # 95 test cases (2780 lines)
+│   ├── foreign_test.go         # 10 test cases (726 lines)
+│   └── svg_test.go             # 24 test cases (541 lines)
 │
 └── tests/                      # Test fixture .vsdx files
     ├── test1.vsdx              # 3 pages, 4 shapes (basic)
@@ -307,7 +311,7 @@ XML parsing uses [github.com/beevik/etree](https://github.com/beevik/etree) for 
 go test ./vsdx/... -v
 ```
 
-95 test cases covering all features. Test fixtures are `.vsdx` files in `tests/`.
+129 test cases across 3 files covering all features. Test fixtures are `.vsdx` files in `tests/`.
 
 ## Credits
 

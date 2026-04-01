@@ -7,17 +7,6 @@
 *.test
 *.out
 
-# Python (legacy)
-/build/
-/dist/
-/.pytest_cache/
-/venv*/
-/vsdx.egg-info/
-__pycache__/
-
-# Docs
-/docs/_build/
-
 # Test output
 /tests/out/
 

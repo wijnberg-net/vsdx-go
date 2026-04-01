@@ -28,9 +28,7 @@ func newGeometry(xml *etree.Element, shape *Shape) *Geometry {
 	masterShape := shape.MasterShape()
 	if masterShape != nil && masterShape.Geometry != nil {
 		// Copy master cells (not share reference)
-		for _, cell := range masterShape.Geometry.Cells {
-			g.Cells = append(g.Cells, cell)
-		}
+		g.Cells = append(g.Cells, masterShape.Geometry.Cells...)
 	}
 
 	// Add/overwrite with local cells

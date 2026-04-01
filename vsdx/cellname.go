@@ -8,14 +8,14 @@ type CellName = string
 // Cell name constants for shape properties.
 const (
 	// Position cells
-	CellPinX   CellName = "PinX"
-	CellPinY   CellName = "PinY"
+	CellPinX    CellName = "PinX"
+	CellPinY    CellName = "PinY"
 	CellLocPinX CellName = "LocPinX"
 	CellLocPinY CellName = "LocPinY"
-	CellBeginX CellName = "BeginX"
-	CellBeginY CellName = "BeginY"
-	CellEndX   CellName = "EndX"
-	CellEndY   CellName = "EndY"
+	CellBeginX  CellName = "BeginX"
+	CellBeginY  CellName = "BeginY"
+	CellEndX    CellName = "EndX"
+	CellEndY    CellName = "EndY"
 
 	// Size cells
 	CellWidth  CellName = "Width"
@@ -23,10 +23,10 @@ const (
 	CellAngle  CellName = "Angle"
 
 	// Style cells
-	CellLineWeight CellName = "LineWeight"
-	CellLineColor  CellName = "LineColor"
+	CellLineWeight  CellName = "LineWeight"
+	CellLineColor   CellName = "LineColor"
 	CellFillForegnd CellName = "FillForegnd"
-	CellEndArrow   CellName = "EndArrow"
+	CellEndArrow    CellName = "EndArrow"
 
 	// Text pin cells
 	CellTxtPinX CellName = "TxtPinX"

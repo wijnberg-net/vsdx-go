@@ -7,7 +7,7 @@ import (
 
 // Sentinel errors for common error conditions.
 var (
-	ErrInvalidFileType = errors.New("invalid file type: expected .vsdx or .vsdm")
+	ErrInvalidFileType = errors.New("invalid file type: expected .vsdx, .vsdm, .vssx, or .vssm")
 	ErrInvalidFormat   = errors.New("invalid vsdx format")
 	ErrShapeNotFound   = errors.New("shape not found")
 )

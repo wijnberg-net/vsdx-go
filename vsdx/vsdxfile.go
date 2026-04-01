@@ -37,13 +37,18 @@ type VisioFile struct {
 	documentXMLRels *etree.Document
 	mastersXML      *etree.Element // root element of masters.xml
 	masterIndex     map[string]*Page
-	debug           bool
+	debug           bool //nolint:unused // reserved for future debug logging
 }
 
-// Open opens a .vsdx or .vsdm file and returns a VisioFile.
+// IsStencil returns true if this file is a stencil (.vssx/.vssm) with master shapes but no pages.
+func (v *VisioFile) IsStencil() bool {
+	return len(v.Pages) == 0 && len(v.MasterPages) > 0
+}
+
+// Open opens a .vsdx, .vsdm, .vssx, or .vssm file and returns a VisioFile.
 func Open(filename string) (*VisioFile, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
-	if ext != ".vsdx" && ext != ".vsdm" {
+	if ext != ".vsdx" && ext != ".vsdm" && ext != ".vssx" && ext != ".vssm" {
 		return nil, &FileError{Path: filename, Err: ErrInvalidFileType}
 	}
 
@@ -87,7 +92,7 @@ func OpenBytes(data []byte) (*VisioFile, error) {
 			return nil, fmt.Errorf("opening %s: %w", f.Name, err)
 		}
 		content, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", f.Name, err)
 		}
@@ -115,7 +120,7 @@ func (v *VisioFile) loadZipContents() error {
 	if err != nil {
 		return fmt.Errorf("opening zip: %w", err)
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck // best-effort close of ZIP reader
 
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
@@ -126,7 +131,7 @@ func (v *VisioFile) loadZipContents() error {
 			return fmt.Errorf("opening %s: %w", f.Name, err)
 		}
 		data, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", f.Name, err)
 		}
@@ -149,14 +154,18 @@ func (v *VisioFile) fileToXML(filename string) (*etree.Document, error) {
 }
 
 // loadPages loads page objects from the ZIP contents.
+// For stencil files (.vssx/.vssm), pages.xml.rels may not exist — this is normal.
 func (v *VisioFile) loadPages() error {
 	// Load pages.xml.rels to get page filename mappings
 	relsDoc, err := v.fileToXML("visio/pages/_rels/pages.xml.rels")
 	if err != nil {
 		return fmt.Errorf("loading pages.xml.rels: %w", err)
 	}
+
+	// Stencils (.vssx/.vssm) have no pages — skip page loading
 	if relsDoc == nil {
-		return fmt.Errorf("%w: pages.xml.rels not found", ErrInvalidFormat)
+		// Still load other XML files needed for the file structure
+		return v.loadCommonXML()
 	}
 	v.pagesXMLRels = relsDoc
 
@@ -217,7 +226,13 @@ func (v *VisioFile) loadPages() error {
 		v.Pages = append(v.Pages, page)
 	}
 
-	// Load other XML files
+	return v.loadCommonXML()
+}
+
+// loadCommonXML loads XML files shared between regular documents and stencils.
+func (v *VisioFile) loadCommonXML() error {
+	var err error
+
 	v.contentTypesXML, err = v.fileToXML("[Content_Types].xml")
 	if err != nil {
 		return fmt.Errorf("loading [Content_Types].xml: %w", err)
@@ -290,6 +305,17 @@ func (v *VisioFile) loadMasterPages() {
 		masterPage := newPage(masterDoc, masterPath, masterName, masterID, relID, v)
 		masterPage.MasterUniqueID = masterUniqueID
 		masterPage.MasterBaseID = masterBaseID
+
+		// Load master-level rels (for Foreign image references)
+		baseMasterFile := filepath.Base(masterPath)
+		masterRelsPath := "visio/masters/_rels/" + baseMasterFile + ".rels"
+		if _, ok := v.ZipFileContents[masterRelsPath]; ok {
+			masterPageRels, err := v.fileToXML(masterRelsPath)
+			if err == nil && masterPageRels != nil {
+				masterPage.RelsXMLFile = masterRelsPath
+				masterPage.RelsXML = masterPageRels
+			}
+		}
 
 		v.MasterPages = append(v.MasterPages, masterPage)
 		v.masterIndex[masterName] = masterPage
@@ -766,7 +792,7 @@ func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape
 	if err != nil {
 		return nil, fmt.Errorf("loading media template: %w", err)
 	}
-	defer media.Close()
+	defer media.Close() //nolint:errcheck // best-effort close of media template
 
 	// Copy straight connector template to destination page
 	connectorTemplate := media.StraightConnector()
@@ -846,11 +872,50 @@ func (v *VisioFile) ensureMasterPages(page *Page, media *Media, connShape *Shape
 		v.addContentTypesOverride("/visio/masters/masters.xml", "application/vnd.ms-visio.masters+xml")
 		v.addContentTypesOverride("/visio/masters/master1.xml", "application/vnd.ms-visio.master+xml")
 
-		// Copy page rels from media template
+		// Merge master rels from media template into page rels
 		if relsData := media.RelsXML(); relsData != nil {
-			doc := etree.NewDocument()
-			doc.ReadFromBytes(relsData)
-			page.RelsXML = doc
+			mediaDoc := etree.NewDocument()
+			_ = mediaDoc.ReadFromBytes(relsData)
+
+			if page.RelsXML == nil {
+				// No existing rels — use media template directly
+				page.RelsXML = mediaDoc
+			} else {
+				// Merge: copy each media rel into existing page rels with new rId
+				root := page.RelsXML.Root()
+				for _, rel := range mediaDoc.Root().SelectElements("Relationship") {
+					relType := rel.SelectAttrValue("Type", "")
+					target := rel.SelectAttrValue("Target", "")
+
+					// Skip if this exact type+target already exists
+					found := false
+					for _, existing := range root.SelectElements("Relationship") {
+						if existing.SelectAttrValue("Type", "") == relType &&
+							existing.SelectAttrValue("Target", "") == target {
+							found = true
+							break
+						}
+					}
+					if found {
+						continue
+					}
+
+					// Find next available rId
+					maxID := 0
+					for _, existing := range root.SelectElements("Relationship") {
+						id := existing.SelectAttrValue("Id", "")
+						if strings.HasPrefix(id, "rId") {
+							if n, err := strconv.Atoi(id[3:]); err == nil && n > maxID {
+								maxID = n
+							}
+						}
+					}
+					newRel := root.CreateElement("Relationship")
+					newRel.CreateAttr("Id", fmt.Sprintf("rId%d", maxID+1))
+					newRel.CreateAttr("Type", relType)
+					newRel.CreateAttr("Target", target)
+				}
+			}
 			page.RelsXMLFile = "visio/pages/_rels/" + filepath.Base(page.filename) + ".rels"
 		}
 	}
@@ -1068,33 +1133,40 @@ func (v *VisioFile) updateIDs(shape *etree.Element, idMap map[string]string) {
 	}
 }
 
-// SaveVsdx saves the VisioFile to a new .vsdx file.
-// This updates all modified XML back into the zip contents and writes to disk.
-func (v *VisioFile) SaveVsdx(filename string) error {
+// SaveVsdxBytes serializes the VisioFile to an in-memory .vsdx (ZIP) and returns the bytes.
+// All modified XML documents are written back into the zip contents before building the archive.
+func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 	// Update pages XML back to zip contents
 	if v.pagesXML != nil {
 		data, err := v.pagesXML.WriteToBytes()
 		if err != nil {
-			return fmt.Errorf("serializing pages.xml: %w", err)
+			return nil, fmt.Errorf("serializing pages.xml: %w", err)
 		}
 		v.ZipFileContents["visio/pages/pages.xml"] = data
 	}
 	if v.pagesXMLRels != nil {
 		data, err := v.pagesXMLRels.WriteToBytes()
 		if err != nil {
-			return fmt.Errorf("serializing pages.xml.rels: %w", err)
+			return nil, fmt.Errorf("serializing pages.xml.rels: %w", err)
 		}
 		v.ZipFileContents["visio/pages/_rels/pages.xml.rels"] = data
 	}
 
-	// Update each page XML
+	// Update each page XML and page-level rels
 	for _, page := range v.Pages {
 		if page.xml != nil {
 			data, err := page.xml.WriteToBytes()
 			if err != nil {
-				return fmt.Errorf("serializing %s: %w", page.filename, err)
+				return nil, fmt.Errorf("serializing %s: %w", page.filename, err)
 			}
 			v.ZipFileContents[page.filename] = data
+		}
+		if page.RelsXML != nil && page.RelsXMLFile != "" {
+			data, err := page.RelsXML.WriteToBytes()
+			if err != nil {
+				return nil, fmt.Errorf("serializing %s: %w", page.RelsXMLFile, err)
+			}
+			v.ZipFileContents[page.RelsXMLFile] = data
 		}
 	}
 
@@ -1102,49 +1174,58 @@ func (v *VisioFile) SaveVsdx(filename string) error {
 	if v.contentTypesXML != nil {
 		data, err := v.contentTypesXML.WriteToBytes()
 		if err != nil {
-			return fmt.Errorf("serializing [Content_Types].xml: %w", err)
+			return nil, fmt.Errorf("serializing [Content_Types].xml: %w", err)
 		}
 		v.ZipFileContents["[Content_Types].xml"] = data
 	}
 	if v.appXML != nil {
 		data, err := v.appXML.WriteToBytes()
 		if err != nil {
-			return fmt.Errorf("serializing app.xml: %w", err)
+			return nil, fmt.Errorf("serializing app.xml: %w", err)
 		}
 		v.ZipFileContents["docProps/app.xml"] = data
 	}
 	if v.documentXML != nil {
 		data, err := v.documentXML.WriteToBytes()
 		if err != nil {
-			return fmt.Errorf("serializing document.xml: %w", err)
+			return nil, fmt.Errorf("serializing document.xml: %w", err)
 		}
 		v.ZipFileContents["visio/document.xml"] = data
 	}
 	if v.documentXMLRels != nil {
 		data, err := v.documentXMLRels.WriteToBytes()
 		if err != nil {
-			return fmt.Errorf("serializing document.xml.rels: %w", err)
+			return nil, fmt.Errorf("serializing document.xml.rels: %w", err)
 		}
 		v.ZipFileContents["visio/_rels/document.xml.rels"] = data
 	}
 
-	// Write zip file
+	// Build zip archive in memory
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 	for path, content := range v.ZipFileContents {
 		fw, err := w.Create(path)
 		if err != nil {
-			return fmt.Errorf("creating %s in zip: %w", path, err)
+			return nil, fmt.Errorf("creating %s in zip: %w", path, err)
 		}
 		if _, err := fw.Write(content); err != nil {
-			return fmt.Errorf("writing %s to zip: %w", path, err)
+			return nil, fmt.Errorf("writing %s to zip: %w", path, err)
 		}
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("closing zip: %w", err)
+		return nil, fmt.Errorf("closing zip: %w", err)
 	}
 
-	return writeFile(filename, buf.Bytes())
+	return buf.Bytes(), nil
+}
+
+// SaveVsdx saves the VisioFile to a new .vsdx file on disk.
+func (v *VisioFile) SaveVsdx(filename string) error {
+	data, err := v.SaveVsdxBytes()
+	if err != nil {
+		return err
+	}
+	return writeFile(filename, data)
 }
 
 // writeFile writes data to a file, creating directories as needed.

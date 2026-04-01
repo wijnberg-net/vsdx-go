@@ -57,7 +57,8 @@ type Shape struct {
 	ShapeType     string // Type attribute (e.g., "Shape", "Group")
 	ShapeName     string // NameU or Name attribute
 	Cells         map[string]*Cell
-	Geometry      *Geometry
+	Geometry      *Geometry   // first geometry section (for backward compat)
+	Geometries    []*Geometry // all geometry sections (Geometry IX=0, 1, 2, ...)
 
 	dataProperties map[string]*DataProperty // lazy loaded
 }
@@ -93,10 +94,16 @@ func newShape(xml *etree.Element, parent ShapeParent, page *Page) *Shape {
 		s.Cells[cell.Name()] = cell
 	}
 
-	// Get Geometry section
-	geometrySection := xml.FindElement("Section[@N='Geometry']")
-	if geometrySection != nil {
-		s.Geometry = newGeometry(geometrySection, s)
+	// Get all Geometry sections (shapes can have multiple: IX=0, 1, 2, ...)
+	for _, geometrySection := range xml.SelectElements("Section") {
+		if geometrySection.SelectAttrValue("N", "") != "Geometry" {
+			continue
+		}
+		g := newGeometry(geometrySection, s)
+		s.Geometries = append(s.Geometries, g)
+		if s.Geometry == nil {
+			s.Geometry = g // backward compat: first section
+		}
 		// Also add geometry row cells to shape cells dict
 		for _, rowElem := range geometrySection.SelectElements("Row") {
 			rowType := rowElem.SelectAttrValue("T", "")
@@ -332,19 +339,39 @@ func (s *Shape) TextStyleID() string { return s.xml.SelectAttrValue("TextStyle",
 func (s *Shape) SetLineWeight(v float64) {
 	s.SetCellValue(CellLineWeight, fmtFloat(v))
 }
-func (s *Shape) SetLineColor(v string)   { s.SetCellValue(CellLineColor, v) }
-func (s *Shape) SetFillColor(v string)   { s.SetCellValue(CellFillForegnd, v) }
+func (s *Shape) SetLineColor(v string) { s.SetCellValue(CellLineColor, v) }
+func (s *Shape) SetFillColor(v string) { s.SetCellValue(CellFillForegnd, v) }
 
 // SetTextColor sets the first text color in the Character section.
 func (s *Shape) SetTextColor(v string) {
+	s.ensureCharacterCell("Color", v)
+}
+
+// SetTextSize sets the font size in the Character section.
+// Value is in inches (e.g., 0.111111 for 8pt = 8/72 in).
+func (s *Shape) SetTextSize(v float64) {
+	s.ensureCharacterCell("Size", fmtFloat(v))
+}
+
+// ensureCharacterCell sets a cell in the Character section, creating the
+// section and row if they don't exist.
+func (s *Shape) ensureCharacterCell(cellName, value string) {
 	charSection := s.xml.FindElement("Section[@N='Character']")
 	if charSection == nil {
-		return
+		charSection = s.xml.CreateElement("Section")
+		charSection.CreateAttr("N", "Character")
 	}
-	colorCell := charSection.FindElement("Row/Cell[@N='Color']")
-	if colorCell != nil {
-		colorCell.CreateAttr("V", v)
+	row := charSection.FindElement("Row")
+	if row == nil {
+		row = charSection.CreateElement("Row")
+		row.CreateAttr("IX", "0")
 	}
+	cell := row.FindElement("Cell[@N='" + cellName + "']")
+	if cell == nil {
+		cell = row.CreateElement("Cell")
+		cell.CreateAttr("N", cellName)
+	}
+	cell.CreateAttr("V", value)
 }
 
 // SetEndArrow sets the EndArrow cell value. Use 13 for standard arrow, 0 for none.
@@ -378,12 +405,15 @@ func (s *Shape) Text() string {
 }
 
 // SetText sets the text content of the shape. Clears existing sub-element text.
+// Creates a Text element if one doesn't already exist.
 func (s *Shape) SetText(text string) {
 	textElem := s.xml.FindElement("Text")
-	if textElem != nil {
+	if textElem == nil {
+		textElem = s.xml.CreateElement("Text")
+	} else {
 		clearAllText(textElem)
-		textElem.SetText(text)
 	}
+	textElem.SetText(text)
 }
 
 // clearAllText recursively clears text content from an element and its children.
@@ -423,7 +453,7 @@ func (s *Shape) removeChildShape(child *Shape) {
 // FindReplace finds and replaces text in this shape and all sub-shapes.
 func (s *Shape) FindReplace(old, new string) {
 	text := s.Text()
-	s.SetText(strings.Replace(text, old, new, -1))
+	s.SetText(strings.ReplaceAll(text, old, new))
 	for _, child := range s.ChildShapes() {
 		child.FindReplace(old, new)
 	}
@@ -434,7 +464,7 @@ func (s *Shape) ApplyTextFilter(context map[string]string) {
 	text := s.Text()
 	for key, value := range context {
 		rKey := "{{" + key + "}}"
-		text = strings.Replace(text, rKey, value, -1)
+		text = strings.ReplaceAll(text, rKey, value)
 	}
 	s.SetText(text)
 	for _, child := range s.ChildShapes() {
