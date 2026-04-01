@@ -9,34 +9,39 @@ Port van de Python [vsdx](https://github.com/dave-howard/vsdx) library (v0.6.1).
 vsdx-go/
 ├── go.mod
 ├── vsdx/                       # Alle library code in één package
-│   ├── doc.go                  # Package-level documentatie (40 lines)
+│   ├── doc.go                  # Package-level documentatie (61 lines)
 │   │
 │   │── # Core types
-│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1153 lines)
-│   ├── page.go                 # Page: shapes, search, connects, dimensions (408 lines)
-│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie (857 lines)
+│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1234 lines)
+│   ├── page.go                 # Page: shapes, search, connects, dimensions, layers (476 lines)
+│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie (1193 lines)
 │   ├── cell.go                 # Cell: name/value/formula triple (43 lines)
 │   ├── connect.go              # Connect: from/to shape relaties (52 lines)
 │   ├── data_property.go        # DataProperty: custom shape properties met master inheritance (123 lines)
 │   │
 │   │── # Geometry
-│   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paden (342 lines)
+│   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paden + builders (385 lines)
 │   │
 │   │── # Features
+│   ├── foreign.go              # AddImage, AddShape, GroupShapes, SetForeignData (421 lines)
 │   ├── template.go             # RenderTemplate: Jinja2-achtige directives (490 lines)
 │   ├── diff.go                 # VisioFileDiff: twee .vsdx bestanden vergelijken (241 lines)
+│   ├── svg.go                  # ShapeToSVG: SVG rendering van shapes (893 lines)
 │   ├── media.go                # Media: embedded template shapes voor connectors (67 lines)
 │   ├── formula.go              # CalcValue: formule-evaluatie (35 lines)
 │   │
 │   │── # Support
-│   ├── cellname.go             # CellName constants: PinX, Width, FillForegnd, etc. (56 lines)
+│   ├── cellname.go             # CellName constants: 40+ cel definities (83 lines)
 │   ├── errors.go               # Sentinel errors: ErrInvalidFileType, FileError (27 lines)
 │   ├── types.go                # Result structs: Point, Rect (11 lines)
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   └── vsdx_test.go            # 95 test cases (2780 lines)
+│   ├── vsdx_test.go            # 124 test cases (3825 lines)
+│   ├── foreign_test.go         # 10 test cases (727 lines)
+│   └── svg_test.go             # 24 test cases (541 lines)
 │
+├── cmd/stencil-diag/main.go    # Diagnostic tool voor stencil bestanden
 ├── tests/                      # Test fixture .vsdx bestanden (15+ files)
 └── docs/MS-VSDX.pdf            # Microsoft VSDX format specificatie (468 pagina's)
 ```
@@ -78,21 +83,38 @@ Dit geldt voor cells, text, data properties, en geometry.
 | Type | Bestand | Verantwoordelijkheid |
 |------|---------|---------------------|
 | `VisioFile` | `vsdxfile.go` | Hoofd-entrypoint: ZIP openen/opslaan, pagina-beheer |
-| `Page` | `page.go` | Pagina of master-pagina: shapes, connects, afmetingen |
-| `Shape` | `shape.go` | Shape of groep: tekst, positie, stijl, cellen, hiërarchie |
+| `Page` | `page.go` | Pagina of master-pagina: shapes, connects, afmetingen, layers |
+| `Shape` | `shape.go` | Shape of groep: tekst, positie, stijl, cellen, hiërarchie, protection |
 | `ShapeParent` | `shape.go` | Interface voor Shape.Parent (`*Page` of `*Shape`) |
 | `Cell` | `cell.go` | Naam/waarde/formule paar uit XML Cell element |
 | `DataProperty` | `data_property.go` | Custom properties met master inheritance |
 | `Connect` | `connect.go` | Verbinding tussen twee shapes |
-| `Geometry` | `geometry.go` | Shape pad-definitie (MoveTo, LineTo, ArcTo, etc.) |
+| `Geometry` | `geometry.go` | Shape pad-definitie + builders (MoveTo, LineTo, ArcTo, etc.) |
 | `Point`, `Rect` | `types.go` | Gestructureerde return waarden |
-| `CellName` | `cellname.go` | Type alias + constants voor cell namen |
+| `CellName` | `cellname.go` | Type alias + 40+ constants voor cell namen |
 | `FileError` | `errors.go` | Error type met path en wrapping |
 
 ### Interfaces
 
 - **`ShapeParent`** - Unexported method interface, geïmplementeerd door `*Page` en `*Shape`. Maakt `Shape.Remove()` type-safe.
 - **`GeometryCellParent`** - Marker interface voor `*Geometry` en `*GeometryRow`.
+
+### Shape Secties (XML Section types)
+
+De library leest en schrijft de volgende VSDX shape secties:
+
+| Sectie | Lezen | Schrijven | Methods |
+|--------|-------|-----------|---------|
+| **Character** | ✓ | ✓ | `SetCharBold`, `SetCharItalic`, `SetCharSize`, `SetCharFont`, `SetTextColor` |
+| **Paragraph** | ✓ | ✓ | `SetParagraphAlign` (AlignLeft/Center/Right/Justify) |
+| **Geometry** | ✓ | ✓ | `AddGeometry`, `AddGeometryRect`, `AddMoveTo/LineTo/RelMoveTo/RelLineTo/ArcTo` |
+| **Property** | ✓ | ✓ | `DataProperties`, `AddDataProperty`, `SetValue`, `GetAttribute` |
+| **Hyperlink** | ✓ | ✓ | `AddHyperlink(address, description)` |
+| **Connection** | ✓ | ✓ | `AddConnectionPoint(x, y)` |
+| **Layer** | ✓ | ✓ | `Page.AddLayer(name)`, `Shape.SetLayerMember("0;1")` |
+| **Protection** | ✓ | ✓ | `SetLockMove`, `SetLockSize`, `SetLockDelete`, `SetLockRotate`, `SetLockAspect` |
+| **User** | ✓ | ✓ | `AddUserCell(name, value)`, `UserCellValue(name)` |
+| **ForeignData** | ✓ | ✓ | `AddImage`, `SetForeignData` |
 
 ## VSDX Bestandsformaat
 
@@ -149,12 +171,15 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
   - §2.2.5.3.3.1 Cell Default Values
   - §2.2.11.2 Formulas - volledige formule grammatica
   - §2.2.5.4 Inheritance - 5 types (wij ondersteunen master-to-shape)
-  - §2.4.2 GeometryRowTypes - 15 types (wij: MoveTo, LineTo, ArcTo)
+  - §2.4.2 GeometryRowTypes - 15 types (wij: MoveTo, LineTo, RelMoveTo, RelLineTo, ArcTo)
   - §2.4.4 Cells - complete catalogus van cel definities
 
 ## Huidige Status
 
-- 18 Go source bestanden, ~3974 lines code + ~2780 lines tests = ~6754 total
-- 95 test cases (alle passing)
+- 19 Go source bestanden, ~5864 lines code + ~5273 lines tests = ~11137 total
+- 158 test cases (alle passing), 85.9% code coverage
+- ~50-55% MS-VSDX spec coverage (10 van 17 secties geïmplementeerd)
 - Alle fasen compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
-- Idiomatisch Go: cell constants, sentinel errors, typed interfaces, result structs, code deduplicatie
+- Netwerk-diagram features: character/paragraph formatting, fill transparency, line patterns,
+  geometry builders, layers, hyperlinks, connection points, protection, user-defined cells
+- Idiomatisch Go: cell constants, sentinel errors, typed interfaces, result structs

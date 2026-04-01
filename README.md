@@ -55,44 +55,40 @@ func main() {
 vsdx-go/
 ├── go.mod
 ├── vsdx/                       # All library code in one package
-│   ├── doc.go                  # Package-level documentation (40 lines)
+│   ├── doc.go                  # Package-level documentation (61 lines)
 │   │
 │   │── # Core types
-│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1153 lines)
-│   ├── page.go                 # Page: shapes, search, connects, dimensions (408 lines)
-│   ├── shape.go                # Shape: position, text, style, cells, hierarchy (857 lines)
+│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1234 lines)
+│   ├── page.go                 # Page: shapes, search, connects, dimensions, layers (476 lines)
+│   ├── shape.go                # Shape: position, text, style, cells, hierarchy, protection (1193 lines)
 │   ├── cell.go                 # Cell: name/value/formula triple (43 lines)
 │   ├── connect.go              # Connect: from/to shape relationships (52 lines)
 │   ├── data_property.go        # DataProperty: custom shape properties with master inheritance (123 lines)
 │   │
 │   │── # Geometry
-│   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paths (342 lines)
+│   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paths + builders (385 lines)
 │   │
 │   │── # Features
+│   ├── foreign.go              # AddImage, AddShape, GroupShapes, SetForeignData (421 lines)
 │   ├── template.go             # RenderTemplate: Jinja2-style directives (490 lines)
 │   ├── diff.go                 # VisioFileDiff: compare two .vsdx files (241 lines)
-│   ├── foreign.go              # Foreign shapes: embedded images, shape creation, grouping, data properties (421 lines)
-│   ├── svg.go                  # SVG rendering: Visio geometry to SVG path conversion, brand color detection, EMF conversion (893 lines)
+│   ├── svg.go                  # ShapeToSVG: SVG rendering of shapes (893 lines)
 │   ├── media.go                # Media: embedded template shapes for connectors (67 lines)
 │   ├── formula.go              # CalcValue: formula evaluation (35 lines)
 │   │
 │   │── # Support
-│   ├── cellname.go             # CellName constants: PinX, Width, FillForegnd, etc. (56 lines)
+│   ├── cellname.go             # CellName constants: 40+ cell definitions (83 lines)
 │   ├── errors.go               # Sentinel errors: ErrInvalidFileType, FileError (27 lines)
 │   ├── types.go                # Result structs: Point, Rect (11 lines)
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   ├── vsdx_test.go            # 95 test cases (2780 lines)
-│   ├── foreign_test.go         # 10 test cases (726 lines)
+│   ├── vsdx_test.go            # 124 test cases (3825 lines)
+│   ├── foreign_test.go         # 10 test cases (727 lines)
 │   └── svg_test.go             # 24 test cases (541 lines)
 │
-└── tests/                      # Test fixture .vsdx files
-    ├── test1.vsdx              # 3 pages, 4 shapes (basic)
-    ├── test2.vsdx              # Group shapes
-    ├── test3_house.vsdx        # Master shapes
-    ├── test4_connectors.vsdx   # Connects/connectors
-    └── ...                     # 15+ fixture files
+├── cmd/stencil-diag/main.go    # Diagnostic tool for stencil files
+└── tests/                      # Test fixture .vsdx files (15+ files)
 ```
 
 ### Key data flow
@@ -205,24 +201,96 @@ shape.DataProperties()                    // map[string]*DataProperty
 ### Shapes - editing
 
 ```go
+// Position and size
 shape.SetX(3.0) / shape.SetY(5.0)
 shape.SetWidth(2.0) / shape.SetHeight(1.5)
-shape.SetText("new text")
-shape.SetFillColor("#00ff00")
-shape.SetLineColor("#ff0000")
-shape.SetTextColor("#0000ff")
-shape.SetLineWeight(0.5)
-shape.SetEndArrow(13)
 shape.SetAngle(0.5)
-shape.SetCellValue("PinX", "5.0")         // set or create cell
-shape.SetCellFormula("LocPinX", "Width*0.5")
 shape.Move(1.0, 2.0)                      // move by delta
-shape.Remove()                            // remove from parent
+
+// Text
+shape.SetText("new text")
 shape.FindReplace("old", "new")
 
-// Connect shapes
+// Character formatting
+shape.SetCharBold(true)
+shape.SetCharItalic(true)
+shape.SetCharSize(12)                      // points
+shape.SetCharFont("Arial")
+shape.SetTextColor("#0000ff")
+shape.SetParagraphAlign(vsdx.AlignCenter)  // AlignLeft/Center/Right/Justify
+
+// Line style
+shape.SetLineColor("#ff0000")
+shape.SetLineWeight(0.02)
+shape.SetLinePattern(vsdx.LinePatternDash) // Solid/Dash/Dot/DashDot/DashDotDot
+shape.SetLineCap(vsdx.LineCapRound)        // Round/Square/Extended
+shape.SetBeginArrow(13)                    // bidirectional arrows
+shape.SetEndArrow(13)
+shape.SetRounding(0.1)                     // rounded corners (inches)
+
+// Fill style
+shape.SetFillColor("#00ff00")
+shape.SetFillPattern(1)                    // 0=transparent, 1=solid, 2-24=hatches
+shape.SetFillTransparency(0.5)             // 0.0=opaque, 1.0=transparent
+shape.SetFillBkgndColor("#ffffff")
+shape.SetFillBkgndTransparency(0.8)
+
+// Text block positioning (for connector labels)
+shape.SetTxtPinX(1.0) / shape.SetTxtPinY(0.2)
+shape.SetTxtWidth(2.0) / shape.SetTxtHeight(0.25)
+
+// Generic cell access
+shape.SetCellValue("PinX", "5.0")
+shape.SetCellFormula("LocPinX", "Width*0.5")
+
+// Hyperlinks
+shape.AddHyperlink("https://example.com", "Click here")
+
+// Connection points
+shape.AddConnectionPoint(0.5, 0)           // bottom center
+shape.AddConnectionPoint(0.5, 1.0)         // top center
+
+// Protection
+shape.SetLockMove(true)
+shape.SetLockDelete(true)
+shape.SetLockSize(true)
+
+// User-defined cells (metadata without Shape Data pane)
+shape.AddUserCell("device_id", "12345")
+val := shape.UserCellValue("device_id")
+
+// Tooltip
+shape.SetComment("Hover text")
+
+// Layers
+idx := page.AddLayer("L3 Links")
+shape.SetLayerMember("0")                  // or "0;1" for multiple
+
+// Page auto-size
+page.AutoSize(0.5)                         // margin in inches
+
+// Shape removal and connectors
+shape.Remove()
 conn, err := vis.ConnectShapes(page, shapeA, shapeB)
 vis.CopyShape(shape.XML(), destPage)
+```
+
+### Geometry builders
+
+```go
+// Add rectangular geometry (fills shape bounds)
+shape.AddGeometryRect()
+
+// Custom geometry paths
+g := shape.AddGeometry()
+g.AddMoveTo(0, 0)
+g.AddLineTo(2, 0)
+g.AddLineTo(2, 1)
+g.AddArcTo(0, 1, 0.5)                     // curved segment
+
+// Relative coordinates (0-1 range)
+g.AddRelMoveTo(0, 0)
+g.AddRelLineTo(1, 0)
 ```
 
 ### Templating
@@ -281,11 +349,13 @@ shape.CellValue(vsdx.CellPinX)           // instead of "PinX"
 shape.SetCellValue(vsdx.CellWidth, "2.0") // instead of "Width"
 ```
 
-Available: `CellPinX`, `CellPinY`, `CellWidth`, `CellHeight`, `CellAngle`,
-`CellBeginX`, `CellBeginY`, `CellEndX`, `CellEndY`, `CellLineWeight`,
-`CellLineColor`, `CellFillForegnd`, `CellFillBkgnd`, `CellCharColor`,
-`CellEndArrow`, `CellBegTrigger`, `CellEndTrigger`, `CellPageWidth`,
-`CellPageHeight`, `CellLocPinX`, `CellLocPinY`
+Position: `CellPinX`, `CellPinY`, `CellLocPinX`, `CellLocPinY`, `CellBeginX`, `CellBeginY`, `CellEndX`, `CellEndY`
+Size: `CellWidth`, `CellHeight`, `CellAngle`
+Line: `CellLineWeight`, `CellLineColor`, `CellLinePattern`, `CellLineCap`, `CellBeginArrow`, `CellEndArrow`, `CellRounding`
+Fill: `CellFillForegnd`, `CellFillBkgnd`, `CellFillPattern`, `CellFillForegndTrans`, `CellFillBkgndTrans`
+Text: `CellTxtPinX`, `CellTxtPinY`, `CellTxtLocPinX`, `CellTxtLocPinY`, `CellTxtWidth`, `CellTxtHeight`, `CellTxtAngle`
+Protection: `CellLockWidth`, `CellLockHeight`, `CellLockMoveX`, `CellLockMoveY`, `CellLockDelete`, `CellLockRotate`, `CellLockAspect`
+Other: `CellLayerMember`, `CellBegTrigger`, `CellEndTrigger`, `CellPageWidth`, `CellPageHeight`
 
 ## VSDX File Format
 
@@ -311,7 +381,7 @@ XML parsing uses [github.com/beevik/etree](https://github.com/beevik/etree) for 
 go test ./vsdx/... -v
 ```
 
-129 test cases across 3 files covering all features. Test fixtures are `.vsdx` files in `tests/`.
+158 test cases across 3 files, 85.9% code coverage. Test fixtures are `.vsdx` files in `tests/`.
 
 ## Credits
 
