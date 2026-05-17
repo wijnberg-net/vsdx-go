@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/beevik/etree"
 )
 
 var testDir string
@@ -6144,5 +6146,243 @@ func TestExportOptions(t *testing.T) {
 	opts := DefaultExportOptions()
 	if opts.DPI != 96 {
 		t.Errorf("default DPI = %v, want 96", opts.DPI)
+	}
+}
+
+func TestCommentsAPI(t *testing.T) {
+	vis := &VisioFile{
+		ZipFileContents: make(map[string][]byte),
+	}
+
+	// Add content types and rels for comments to work
+	vis.ZipFileContents["[Content_Types].xml"] = []byte(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>`)
+	vis.ZipFileContents["visio/_rels/document.xml.rels"] = []byte(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`)
+
+	// Initially no comments
+	if len(vis.Comments()) != 0 {
+		t.Error("new file should have no comments")
+	}
+
+	// Add a comment
+	comment := vis.AddComment(1, "Test comment", "Test Author")
+	if comment == nil {
+		t.Fatal("AddComment returned nil")
+	}
+	if comment.Text != "Test comment" {
+		t.Errorf("comment text = %q, want %q", comment.Text, "Test comment")
+	}
+	if comment.PageID != 1 {
+		t.Errorf("comment pageID = %d, want 1", comment.PageID)
+	}
+
+	// The comment was created with an author, verify the returned comment
+	if comment.AuthorID < 0 {
+		t.Errorf("comment authorID = %d, want >= 0", comment.AuthorID)
+	}
+
+	// Update comment
+	comment.SetText("Updated comment")
+	if comment.Text != "Updated comment" {
+		t.Errorf("updated text = %q, want %q", comment.Text, "Updated comment")
+	}
+
+	// Mark done
+	comment.SetDone(true)
+	if !comment.Done {
+		t.Error("comment should be marked done")
+	}
+}
+
+func TestGetInitials(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"", ""},
+		{"Alice", "A"},
+		{"Bob Smith", "BS"},
+		{"John Paul Jones", "JPJ"},
+	}
+
+	for _, tt := range tests {
+		got := getInitials(tt.name)
+		if got != tt.want {
+			t.Errorf("getInitials(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestLineGradient(t *testing.T) {
+	// Test line gradient parsing and setting
+	doc := etree.NewDocument()
+	shapeElem := doc.CreateElement("Shape")
+	shapeElem.CreateAttr("ID", "1")
+
+	// Add cell for LineGradientEnabled
+	cell := shapeElem.CreateElement("Cell")
+	cell.CreateAttr("N", "LineGradientEnabled")
+	cell.CreateAttr("V", "1")
+
+	// Add section with stops
+	section := shapeElem.CreateElement("Section")
+	section.CreateAttr("N", "LineGradient")
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", "0")
+
+	colorCell := row.CreateElement("Cell")
+	colorCell.CreateAttr("N", "GradientStopColor")
+	colorCell.CreateAttr("V", "#FF0000")
+
+	posCell := row.CreateElement("Cell")
+	posCell.CreateAttr("N", "GradientStopPosition")
+	posCell.CreateAttr("V", "0")
+
+	shape := &Shape{
+		ID:    "1",
+		xml:   shapeElem,
+		Cells: make(map[string]*Cell),
+	}
+	// Populate Cells map with LineGradientEnabled
+	shape.Cells["LineGradientEnabled"] = newCell(cell, shape)
+
+	grad := shape.LineGradient()
+	if grad == nil {
+		t.Fatal("LineGradient() returned nil")
+	}
+	if !grad.Enabled {
+		t.Error("gradient should be enabled")
+	}
+	if len(grad.Stops) != 1 {
+		t.Errorf("expected 1 stop, got %d", len(grad.Stops))
+	}
+	if grad.Stops[0].Color != "#FF0000" {
+		t.Errorf("stop color = %q, want #FF0000", grad.Stops[0].Color)
+	}
+}
+
+func TestDataRecordSet(t *testing.T) {
+	vis := &VisioFile{
+		ZipFileContents: make(map[string][]byte),
+	}
+	vis.ZipFileContents["[Content_Types].xml"] = []byte(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>`)
+
+	// Create a recordset
+	rs := vis.CreateDataRecordSet("TestData", []string{"Name", "Value"})
+	if rs == nil {
+		t.Fatal("CreateDataRecordSet returned nil")
+	}
+	if rs.Name != "TestData" {
+		t.Errorf("recordset name = %q, want %q", rs.Name, "TestData")
+	}
+	if len(rs.Columns) != 2 {
+		t.Errorf("expected 2 columns, got %d", len(rs.Columns))
+	}
+
+	// Add a record
+	rec := rs.AddRecord(map[string]string{
+		"Name":  "Item1",
+		"Value": "100",
+	})
+	if rec == nil {
+		t.Fatal("AddRecord returned nil")
+	}
+	if rec.Values["Name"] != "Item1" {
+		t.Errorf("record Name = %q, want %q", rec.Values["Name"], "Item1")
+	}
+}
+
+func TestFormulaMoreMath(t *testing.T) {
+	eval := NewFormulaEvaluator(nil)
+
+	// Test new math functions
+	tests := []struct {
+		formula string
+		want    float64
+	}{
+		{"GCD(12, 8)", 4},
+		{"LCM(4, 6)", 12},
+		{"FACT(5)", 120},
+		{"EVEN(3)", 4},
+		{"ODD(4)", 5},
+		{"TRUE()", 1},
+		{"FALSE()", 0},
+		{"XOR(1, 0)", 1},
+		{"XOR(1, 1)", 0},
+	}
+
+	for _, tt := range tests {
+		got, ok := eval.Eval(tt.formula)
+		if !ok {
+			t.Errorf("Eval(%q) failed", tt.formula)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("Eval(%q) = %v, want %v", tt.formula, got, tt.want)
+		}
+	}
+}
+
+func TestFormulaColorFunctions(t *testing.T) {
+	eval := NewFormulaEvaluator(nil)
+
+	// Test RGB function
+	rgb, ok := eval.Eval("RGB(255, 128, 0)")
+	if !ok {
+		t.Fatal("RGB() failed")
+	}
+	// RGB should pack to (255 << 16) | (128 << 8) | 0 = 16744448
+	expected := float64(255<<16 | 128<<8 | 0)
+	if rgb != expected {
+		t.Errorf("RGB(255, 128, 0) = %v, want %v", rgb, expected)
+	}
+
+	// Test RED extraction
+	red, ok := eval.Eval("RED(16744448)")
+	if !ok {
+		t.Fatal("RED() failed")
+	}
+	if red != 255 {
+		t.Errorf("RED(16744448) = %v, want 255", red)
+	}
+
+	// Test GREEN extraction
+	green, ok := eval.Eval("GREEN(16744448)")
+	if !ok {
+		t.Fatal("GREEN() failed")
+	}
+	if green != 128 {
+		t.Errorf("GREEN(16744448) = %v, want 128", green)
+	}
+
+	// Test BLUE extraction
+	blue, ok := eval.Eval("BLUE(16744448)")
+	if !ok {
+		t.Fatal("BLUE() failed")
+	}
+	if blue != 0 {
+		t.Errorf("BLUE(16744448) = %v, want 0", blue)
+	}
+}
+
+func TestLineGradientToSVGDef(t *testing.T) {
+	grad := &LineGradient{
+		Enabled: true,
+		Angle:   0,
+		Stops: []GradientStop{
+			{Position: 0, Color: "#FF0000"},
+			{Position: 1, Color: "#0000FF"},
+		},
+	}
+
+	svg := lineGradientToSVGDef("test-grad", grad)
+	if svg == "" {
+		t.Error("lineGradientToSVGDef returned empty string")
+	}
+	if !strings.Contains(svg, "linearGradient") {
+		t.Error("expected linearGradient in output")
+	}
+	if !strings.Contains(svg, "test-grad") {
+		t.Error("expected id in output")
 	}
 }

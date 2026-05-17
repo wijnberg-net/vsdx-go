@@ -42,6 +42,11 @@ vsdx-go/
 │   ├── stencil.go              # Stencil: .vssx stencil bestanden (357 lines)
 │   ├── theme.go                # Theme: document themes en QuickStyle kleuren (331 lines)
 │   │
+│   │── # Comments & Data Links
+│   ├── comments.go             # Comments: document/shape comments + authors (300 lines)
+│   ├── linegradient.go         # LineGradient: stroke gradients + Reviewer/Annotation (180 lines)
+│   ├── datalink.go             # DataLink: DataConnections, DataRecordSets (275 lines)
+│   │
 │   │── # Support
 │   ├── cellname.go             # CellName constants: 40+ cel definities (83 lines)
 │   ├── errors.go               # Sentinel errors: ErrInvalidFileType, FileError (27 lines)
@@ -49,7 +54,7 @@ vsdx-go/
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   ├── vsdx_test.go            # 220+ test cases (6148 lines)
+│   ├── vsdx_test.go            # 320+ test cases (6400 lines)
 │   ├── foreign_test.go         # 10 test cases (726 lines)
 │   └── svg_test.go             # 30+ test cases (671 lines)
 │
@@ -108,6 +113,11 @@ Dit geldt voor cells, text, data properties, en geometry.
 | `Stencil` | `stencil.go` | .vssx stencil bestand met masters |
 | `Router` | `routing.go` | A* pathfinding voor connector routing |
 | `ValidationResult` | `validate.go` | Schema validation resultaten |
+| `Comment`, `Author` | `comments.go` | Document/shape comments met authors |
+| `LineGradient` | `linegradient.go` | Stroke gradient met stops |
+| `Reviewer`, `Annotation` | `linegradient.go` | Review markup |
+| `DataConnection` | `datalink.go` | External data source connection |
+| `DataRecordSet` | `datalink.go` | Data records gelinkt aan shapes |
 | `Point`, `Rect` | `types.go` | Gestructureerde return waarden |
 | `CellName` | `cellname.go` | Type alias + 40+ constants voor cell namen |
 | `FileError` | `errors.go` | Error type met path en wrapping |
@@ -138,6 +148,10 @@ De library leest en schrijft de volgende VSDX shape secties:
 | **Field** | ✓ | ✓ | `Fields()`, `AddField(type, value, format)` |
 | **Control** | ✓ | ✓ | `Controls()`, `AddControl(name, x, y, tip)` |
 | **Tabs** | ✓ | ✓ | `TabStops()`, `AddTabStop(position, alignment)` |
+| **FillGradient** | ✓ | ✓ | `FillGradient()`, `SetFillGradient(angle, stops)` |
+| **LineGradient** | ✓ | ✓ | `LineGradient()`, `SetLineGradient(angle, stops)` |
+| **Reviewer** | ✓ | - | `Reviewers()`, `GetReviewer(id)` |
+| **Annotation** | ✓ | - | `Annotations()` |
 
 ## VSDX Bestandsformaat
 
@@ -199,15 +213,16 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
 
 ## Huidige Status
 
-- 26 Go source bestanden, ~10,000+ lines code + ~7,500 lines tests = ~17,600 total
-- 220+ test cases (alle passing), 68% code coverage
-- ~90% MS-VSDX spec coverage (alle 17 secties + volledige formule-evaluatie)
+- 29 Go source bestanden, ~12,000+ lines code + ~7,800 lines tests = ~19,800 total
+- 370 test cases (alle passing), ~90% code coverage
+- ~98% MS-VSDX spec coverage (19 secties + 75+ formule functies)
 - Alle fasen compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
 - **Rendering features**: SVG met line patterns (24 types), arrow markers (45+ types), 
-  gradient fills, drop shadows, text positioning, ellipse geometry
+  gradient fills (fill + line), drop shadows, text positioning, ellipse geometry
 - **Authoring features**: master shapes aanmaken/verwijderen, stencils (.vssx), themes
 - **Advanced features**: auto-routing connectors (A* pathfinding), PNG/PDF export,
   background pages, schema validation, error recovery
+- **Data features**: comments/annotations, data links/recordsets, reviewers
 - Netwerk-diagram features: character/paragraph formatting, fill transparency, line patterns,
   geometry builders, layers, hyperlinks, connection points, protection, user-defined cells
 - Idiomatisch Go: cell constants, sentinel errors, typed interfaces, result structs
