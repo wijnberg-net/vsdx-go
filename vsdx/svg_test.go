@@ -610,3 +610,62 @@ func TestParsePolylinePoints(t *testing.T) {
 		t.Error("expected nil for formula with only type params")
 	}
 }
+
+func TestLinePatternToSVG(t *testing.T) {
+	tests := []struct {
+		pattern int
+		weight  float64
+		want    string
+	}{
+		{0, 1, ""},         // None
+		{1, 1, ""},         // Solid
+		{2, 1, "4.00 2.00"}, // Dash
+		{3, 1, "1.00 2.00"}, // Dot
+		{4, 1, "4.00 2.00 1.00 2.00"}, // Dash-Dot
+		{10, 1, "1.00 4.00"}, // Sparse Dot
+		{11, 1, "1.00 1.00"}, // Dense Dot
+	}
+
+	for _, tt := range tests {
+		got := linePatternToSVG(tt.pattern, tt.weight)
+		if got != tt.want {
+			t.Errorf("linePatternToSVG(%d, %v) = %q, want %q", tt.pattern, tt.weight, got, tt.want)
+		}
+	}
+}
+
+func TestArrowMarkerKey(t *testing.T) {
+	key := arrowMarkerKey(1, 2, "#FF0000", true)
+	if !strings.Contains(key, "arrow") {
+		t.Error("key should contain 'arrow'")
+	}
+	if !strings.Contains(key, "end") {
+		t.Error("key should contain 'end' for end arrow")
+	}
+
+	keyStart := arrowMarkerKey(1, 2, "#FF0000", false)
+	if !strings.Contains(keyStart, "start") {
+		t.Error("key should contain 'start' for start arrow")
+	}
+}
+
+func TestEscapeXML(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"hello", "hello"},
+		{"<test>", "&lt;test&gt;"},
+		{"&", "&amp;"},
+		{`"quoted"`, "&quot;quoted&quot;"},
+		{"'single'", "&apos;single&apos;"},
+		{"a < b & c > d", "a &lt; b &amp; c &gt; d"},
+	}
+
+	for _, tt := range tests {
+		got := escapeXML(tt.input)
+		if got != tt.want {
+			t.Errorf("escapeXML(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

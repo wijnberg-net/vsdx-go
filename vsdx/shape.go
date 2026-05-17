@@ -288,6 +288,27 @@ func (s *Shape) HasBeginX() bool { return s.CellValue(CellBeginX) != "" }
 func (s *Shape) LocXFormula() string { return s.CellFormula(CellLocPinX) }
 func (s *Shape) LocYFormula() string { return s.CellFormula(CellLocPinY) }
 
+// BoundingBox returns the bounding box of the shape in page coordinates.
+func (s *Shape) BoundingBox() Rect {
+	x := s.X()
+	y := s.Y()
+	w := s.Width()
+	h := s.Height()
+	locX := s.LocX()
+	locY := s.LocY()
+
+	// Calculate the lower-left corner of the shape.
+	left := x - locX
+	bottom := y - locY
+
+	return Rect{
+		X:      left,
+		Y:      bottom,
+		Width:  w,
+		Height: h,
+	}
+}
+
 // --- Position and size setters ---
 
 func (s *Shape) SetX(v float64)      { s.SetCellValue(CellPinX, fmtFloat(v)) }
@@ -1514,13 +1535,13 @@ func (s *Shape) Center() Point {
 // BoundsRect returns the absolute bounds of the shape as a Rect.
 func (s *Shape) BoundsRect() Rect {
 	bx, by, ex, ey := s.Bounds()
-	return Rect{BeginX: bx, BeginY: by, EndX: ex, EndY: ey}
+	return Rect{X: bx, Y: by, Width: ex - bx, Height: ey - by}
 }
 
 // RelativeBoundsRect returns bounds relative to parent group shape as a Rect.
 func (s *Shape) RelativeBoundsRect() Rect {
 	bx, by, ex, ey := s.RelativeBounds()
-	return Rect{BeginX: bx, BeginY: by, EndX: ex, EndY: ey}
+	return Rect{X: bx, Y: by, Width: ex - bx, Height: ey - by}
 }
 
 // --- Connects ---

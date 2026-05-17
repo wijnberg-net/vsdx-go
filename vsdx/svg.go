@@ -43,6 +43,68 @@ type SVGResult struct {
 	Height     float64 // actual viewBox height
 }
 
+// ArrowDef defines an SVG marker for Visio arrow types.
+type ArrowDef struct {
+	Path   string  // SVG path data
+	Width  float64 // marker width relative to line weight
+	Height float64 // marker height relative to line weight
+	RefX   float64 // attachment point X
+	RefY   float64 // attachment point Y
+	Filled bool    // whether the arrow is filled
+}
+
+// visioArrowTypes maps Visio arrow type indices to SVG path definitions.
+// Defined by MS-VSDX spec §2.4.4.
+var visioArrowTypes = map[int]ArrowDef{
+	0:  {}, // None
+	1:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true},      // Triangle (filled)
+	2:  {Path: "M0 0 L10 5 L0 10 L2 5 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true}, // Stealth
+	3:  {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: false},       // Triangle (open)
+	4:  {Path: "M0 0 L10 5 M0 10 L10 5", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: false}, // Line (open)
+	5:  {Path: "M10 5 A5 5 0 1 0 10 5.01 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true},  // Oval (filled)
+	6:  {Path: "M5 0 L10 5 L5 10 L0 5 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true},     // Diamond (filled)
+	7:  {Path: "M5 0 L10 5 L5 10 L0 5 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: false},    // Diamond (open)
+	8:  {Path: "M10 5 A5 5 0 1 0 10 5.01 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: false}, // Oval (open)
+	9:  {Path: "M0 0 L10 5 L0 10 z M0 2 L8 5 L0 8 z", Width: 12, Height: 10, RefX: 12, RefY: 5, Filled: true}, // Double triangle
+	10: {Path: "M0 0 L10 4 L10 6 L0 10 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true},    // Triangle 45°
+	13: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true},          // Standard arrow
+	14: {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: false},           // Open arrow
+	22: {Path: "M0 5 L5 0 L10 5 M0 5 L5 10 L10 5", Width: 10, Height: 10, RefX: 5, RefY: 5, Filled: false}, // Fletching
+	45: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 10, RefY: 5, Filled: true},          // Filled arrow (fallback)
+}
+
+// arrowSizeMultipliers maps Visio arrow size indices (0-6) to scale multipliers.
+var arrowSizeMultipliers = []float64{0.5, 0.7, 1.0, 1.3, 1.6, 2.0, 2.5}
+
+// arrowMarkerKey generates a unique key for a marker definition.
+func arrowMarkerKey(arrowType int, size int, color string, isEnd bool) string {
+	pos := "start"
+	if isEnd {
+		pos = "end"
+	}
+	return fmt.Sprintf("arrow_%d_%d_%s_%s", arrowType, size, strings.TrimPrefix(color, "#"), pos)
+}
+
+// svgRenderResult holds the output from rendering a sub-shape.
+type svgRenderResult struct {
+	pathSVG     string
+	strokeWidth float64
+	markers     []markerRef
+	gradientID  string    // gradient definition ID (if any)
+	gradient    *Gradient // gradient definition (if any)
+	shadowID    string    // shadow filter ID (if any)
+	shadow      *Shadow   // shadow definition (if any)
+}
+
+// markerRef identifies a marker needed for a path.
+type markerRef struct {
+	key       string
+	arrowType int
+	size      int
+	color     string
+	isEnd     bool
+}
+
 // ShapeToSVG converts a Visio shape (typically a master shape) to SVG bytes.
 // The shape's geometry sections are converted to SVG paths with styling.
 // Group shapes recursively include all child shape geometry.
@@ -90,12 +152,24 @@ func ShapeToSVG(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
 
 	var pathElements []string
 	var maxStrokeWidth float64
+	markerDefs := make(map[string]markerRef)   // unique markers needed
+	gradientDefs := make(map[string]*Gradient) // unique gradients needed
+	shadowDefs := make(map[string]*Shadow)     // unique shadows needed
 	for _, ss := range subShapes {
-		pathSVG, sw := renderSubShape(ss, shape, scaleX, scaleY, o, colorFreq)
-		if pathSVG != "" {
-			pathElements = append(pathElements, pathSVG)
-			if sw > maxStrokeWidth {
-				maxStrokeWidth = sw
+		result := renderSubShapeWithMarkers(ss, shape, scaleX, scaleY, o, colorFreq)
+		if result.pathSVG != "" {
+			pathElements = append(pathElements, result.pathSVG)
+			if result.strokeWidth > maxStrokeWidth {
+				maxStrokeWidth = result.strokeWidth
+			}
+			for _, m := range result.markers {
+				markerDefs[m.key] = m
+			}
+			if result.gradientID != "" && result.gradient != nil {
+				gradientDefs[result.gradientID] = result.gradient
+			}
+			if result.shadowID != "" && result.shadow != nil {
+				shadowDefs[result.shadowID] = result.shadow
 			}
 		}
 	}
@@ -111,7 +185,12 @@ func ShapeToSVG(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
 	}
 
 	// Pad viewBox by half the max stroke width so strokes aren't clipped.
-	pad := maxStrokeWidth / 2
+	// Also account for arrow markers which extend beyond the stroke.
+	arrowPad := 0.0
+	if len(markerDefs) > 0 {
+		arrowPad = maxStrokeWidth * 3 // arrows can extend ~3x stroke width
+	}
+	pad := maxStrokeWidth/2 + arrowPad
 	vbX := -pad
 	vbY := -pad
 	vbW := outW + 2*pad
@@ -123,10 +202,50 @@ func ShapeToSVG(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
 		fmtPrec(vbX, o.Precision), fmtPrec(vbY, o.Precision),
 		fmtPrec(vbW, o.Precision), fmtPrec(vbH, o.Precision)))
 	svg.WriteByte('\n')
+
+	// Generate <defs> section with marker, gradient, and shadow definitions.
+	if len(markerDefs) > 0 || len(gradientDefs) > 0 || len(shadowDefs) > 0 {
+		svg.WriteString("  <defs>\n")
+		for _, m := range markerDefs {
+			markerSVG := generateMarkerSVG(m, o.Precision)
+			if markerSVG != "" {
+				svg.WriteString(markerSVG)
+				svg.WriteByte('\n')
+			}
+		}
+		for id, grad := range gradientDefs {
+			gradSVG := gradientToSVGDef(grad, id, o.Precision)
+			if gradSVG != "" {
+				svg.WriteString("    ")
+				svg.WriteString(gradSVG)
+				svg.WriteByte('\n')
+			}
+		}
+		for id, shadow := range shadowDefs {
+			shadowSVG := shadowToSVGFilter(shadow, id, scaleX, scaleY, o.Precision)
+			if shadowSVG != "" {
+				svg.WriteString("    ")
+				svg.WriteString(shadowSVG)
+				svg.WriteByte('\n')
+			}
+		}
+		svg.WriteString("  </defs>\n")
+	}
+
 	for _, p := range pathElements {
 		svg.WriteString(p)
 		svg.WriteByte('\n')
 	}
+
+	// Render text from all sub-shapes.
+	for _, ss := range subShapes {
+		textSVG := renderShapeText(ss, shape, scaleX, scaleY, o)
+		if textSVG != "" {
+			svg.WriteString(textSVG)
+			svg.WriteByte('\n')
+		}
+	}
+
 	svg.WriteString("</svg>\n")
 
 	return &SVGResult{
@@ -135,6 +254,215 @@ func ShapeToSVG(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
 		Width:      outW,
 		Height:     outH,
 	}, nil
+}
+
+// generateMarkerSVG generates an SVG <marker> element for an arrow.
+func generateMarkerSVG(m markerRef, precision int) string {
+	def, ok := visioArrowTypes[m.arrowType]
+	if !ok || def.Path == "" {
+		// Use triangle as fallback for unknown arrow types.
+		def = visioArrowTypes[1]
+		if def.Path == "" {
+			return ""
+		}
+	}
+
+	// Calculate size multiplier.
+	sizeMult := 1.0
+	if m.size >= 0 && m.size < len(arrowSizeMultipliers) {
+		sizeMult = arrowSizeMultipliers[m.size]
+	}
+
+	w := def.Width * sizeMult
+	h := def.Height * sizeMult
+	refX := def.RefX * sizeMult
+	refY := def.RefY * sizeMult
+
+	fillAttr := "none"
+	strokeAttr := m.color
+	if def.Filled {
+		fillAttr = m.color
+		strokeAttr = "none"
+	}
+
+	orient := "auto-start-reverse"
+	if m.isEnd {
+		orient = "auto"
+	}
+
+	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" orient="%s"><path d="%s" fill="%s" stroke="%s"/></marker>`,
+		m.key,
+		fmtPrec(def.Width, precision), fmtPrec(def.Height, precision),
+		fmtPrec(refX, precision), fmtPrec(refY, precision),
+		fmtPrec(w, precision), fmtPrec(h, precision),
+		orient,
+		def.Path, fillAttr, strokeAttr)
+}
+
+// renderShapeText renders text content from a shape as an SVG <text> element.
+func renderShapeText(ss renderableShape, parent *Shape, scaleX, scaleY float64, o *SVGOptions) string {
+	s := ss.shape
+	text := s.Text()
+	if text == "" {
+		return ""
+	}
+
+	// Escape text for XML.
+	text = escapeXML(text)
+
+	parentH := parent.Height()
+	if parentH <= 0 {
+		parentH = 1
+	}
+
+	// Get text block position - defaults to center of shape.
+	txtPinX := toFloat(s.CellValue("TxtPinX"))
+	txtPinY := toFloat(s.CellValue("TxtPinY"))
+	if txtPinX == 0 {
+		txtPinX = ss.localW / 2
+	}
+	if txtPinY == 0 {
+		txtPinY = ss.localH / 2
+	}
+
+	// Get text block dimensions.
+	txtWidth := toFloat(s.CellValue("TxtWidth"))
+	txtHeight := toFloat(s.CellValue("TxtHeight"))
+	if txtWidth == 0 {
+		txtWidth = ss.localW
+	}
+	if txtHeight == 0 {
+		txtHeight = ss.localH
+	}
+
+	// Get text angle (rotation in radians).
+	txtAngle := toFloat(s.CellValue("TxtAngle"))
+
+	// Get vertical alignment: 0=top, 1=middle, 2=bottom.
+	vertAlign := int(toFloat(s.CellValue("VerticalAlign")))
+
+	// Get horizontal alignment from paragraph: 0=left, 1=center, 2=right, 3=justify.
+	horzAlign := int(toFloat(s.CellValue("Para.HorzAlign")))
+	if horzAlign == 0 {
+		horzAlign = 1 // default to center
+	}
+
+	// Get margins.
+	leftMargin := toFloat(s.CellValue("LeftMargin"))
+	rightMargin := toFloat(s.CellValue("RightMargin"))
+	topMargin := toFloat(s.CellValue("TopMargin"))
+	bottomMargin := toFloat(s.CellValue("BottomMargin"))
+
+	// Calculate text position in shape coordinates.
+	// Text block position is relative to shape's pin point.
+	textX := txtPinX + ss.offsetX + leftMargin
+	textY := txtPinY + ss.offsetY
+
+	// Adjust for vertical alignment.
+	switch vertAlign {
+	case 0: // Top
+		textY = ss.offsetY + ss.localH - topMargin
+	case 2: // Bottom
+		textY = ss.offsetY + bottomMargin
+	default: // Middle (1)
+		textY = ss.offsetY + ss.localH/2
+	}
+
+	// Convert to SVG coordinates.
+	svgX, svgY := toSVGCoords(textX, textY, parentH, scaleX, scaleY)
+
+	// SVG text-anchor based on horizontal alignment.
+	textAnchor := "middle"
+	switch horzAlign {
+	case 0: // Left
+		textAnchor = "start"
+		svgX, _ = toSVGCoords(ss.offsetX+leftMargin, textY, parentH, scaleX, scaleY)
+	case 2: // Right
+		textAnchor = "end"
+		svgX, _ = toSVGCoords(ss.offsetX+ss.localW-rightMargin, textY, parentH, scaleX, scaleY)
+	}
+
+	// SVG dominant-baseline based on vertical alignment.
+	baseline := "middle"
+	switch vertAlign {
+	case 0:
+		baseline = "hanging"
+	case 2:
+		baseline = "alphabetic"
+	}
+
+	// Get font size (Character section, Char.Size cell).
+	fontSize := toFloat(s.CellValue("Char.Size"))
+	if fontSize == 0 {
+		fontSize = 12.0 / 72.0 // Default 12pt in inches
+	}
+	fontSizePx := fontSize * ((scaleX + scaleY) / 2)
+
+	// Get text color.
+	textColor := resolveColor(s.TextColor())
+	if textColor == "" {
+		textColor = "#000000"
+	}
+
+	// Get font weight and style.
+	fontWeight := "normal"
+	if s.CellValue("Char.Style") == "17" || s.CellValue("Char.Style") == "1" {
+		fontWeight = "bold"
+	}
+	fontStyle := "normal"
+	if s.CellValue("Char.Style") == "18" || s.CellValue("Char.Style") == "2" {
+		fontStyle = "italic"
+	}
+
+	// Build transform for rotation.
+	transform := ""
+	if txtAngle != 0 {
+		angleDeg := txtAngle * 180 / math.Pi
+		transform = fmt.Sprintf(` transform="rotate(%s %s %s)"`,
+			fmtPrec(-angleDeg, o.Precision),
+			fmtPrec(svgX, o.Precision),
+			fmtPrec(svgY, o.Precision))
+	}
+
+	// Handle multi-line text.
+	lines := strings.Split(text, "\n")
+	if len(lines) == 1 {
+		return fmt.Sprintf(`  <text x="%s" y="%s" text-anchor="%s" dominant-baseline="%s" fill="%s" font-size="%s" font-weight="%s" font-style="%s"%s>%s</text>`,
+			fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision),
+			textAnchor, baseline, textColor,
+			fmtPrec(fontSizePx, o.Precision), fontWeight, fontStyle,
+			transform, text)
+	}
+
+	// Multi-line text: use tspans.
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf(`  <text x="%s" y="%s" text-anchor="%s" dominant-baseline="%s" fill="%s" font-size="%s" font-weight="%s" font-style="%s"%s>`,
+		fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision),
+		textAnchor, baseline, textColor,
+		fmtPrec(fontSizePx, o.Precision), fontWeight, fontStyle,
+		transform))
+
+	lineHeight := fontSizePx * 1.2
+	for i, line := range lines {
+		dy := "0"
+		if i > 0 {
+			dy = fmtPrec(lineHeight, o.Precision)
+		}
+		result.WriteString(fmt.Sprintf(`<tspan x="%s" dy="%s">%s</tspan>`,
+			fmtPrec(svgX, o.Precision), dy, escapeXML(line)))
+	}
+	result.WriteString("</text>")
+	return result.String()
+}
+
+// escapeXML escapes special XML characters in a string.
+func escapeXML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
 }
 
 // renderableShape bundles a shape geometry section with its position relative to the parent group.
@@ -220,14 +548,25 @@ func collectRenderableShapes(shape *Shape) []renderableShape {
 	return result
 }
 
+// renderSubShapeWithMarkers converts a single geometry section to an SVG <path> with marker support.
+func renderSubShapeWithMarkers(ss renderableShape, parent *Shape, scaleX, scaleY float64, o *SVGOptions, colorFreq map[string]int) svgRenderResult {
+	return renderSubShapeInternal(ss, parent, scaleX, scaleY, o, colorFreq)
+}
+
 // renderSubShape converts a single sub-shape's geometry to an SVG <path> element.
 // renderSubShape converts a single geometry section to an SVG <path>.
 // Returns the SVG string and the computed stroke width (for viewBox padding).
 func renderSubShape(ss renderableShape, parent *Shape, scaleX, scaleY float64, o *SVGOptions, colorFreq map[string]int) (string, float64) {
+	result := renderSubShapeInternal(ss, parent, scaleX, scaleY, o, colorFreq)
+	return result.pathSVG, result.strokeWidth
+}
+
+// renderSubShapeInternal is the core rendering function that supports markers, gradients, and shadows.
+func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY float64, o *SVGOptions, colorFreq map[string]int) svgRenderResult {
 	s := ss.shape
 	geom := ss.geom
 	if geom == nil || len(geom.Rows) == 0 {
-		return "", 0
+		return svgRenderResult{}
 	}
 
 	parentW := parent.Width()
@@ -371,6 +710,36 @@ func renderSubShape(ss renderableShape, parent *Shape, scaleX, scaleY float64, o
 				fmtPrec(svgX2, o.Precision), fmtPrec(svgY2, o.Precision)))
 			prevX, prevY = svgX2, svgY2
 
+		case "ellipse":
+			// Ellipse: center (X,Y), control points (A,B) on major axis, (C,D) on minor axis.
+			// SVG ellipse uses center (cx,cy) and radii (rx, ry).
+			cx, cy := row.X(), row.Y()
+			svgCx, svgCy := toSVGCoords(cx+ss.offsetX, cy+ss.offsetY, parentH, scaleX, scaleY)
+			// (A,B) is a point on the ellipse defining the end of the first semi-axis.
+			ax := cellFloat(row, "A")
+			ay := cellFloat(row, "B")
+			// (C,D) is a point on the ellipse defining the end of the second semi-axis.
+			cx2 := cellFloat(row, "C")
+			cy2 := cellFloat(row, "D")
+			// Calculate radii from control points.
+			rx := math.Sqrt(math.Pow(ax-cx, 2)+math.Pow(ay-cy, 2)) * ((scaleX + scaleY) / 2)
+			ry := math.Sqrt(math.Pow(cx2-cx, 2)+math.Pow(cy2-cy, 2)) * ((scaleX + scaleY) / 2)
+			if rx < 0.001 {
+				rx = 0.001
+			}
+			if ry < 0.001 {
+				ry = 0.001
+			}
+			// Draw ellipse as two arcs (SVG has no ellipse path command in d attribute).
+			// M cx-rx,cy A rx,ry 0 1,0 cx+rx,cy A rx,ry 0 1,0 cx-rx,cy Z
+			d.WriteString(fmt.Sprintf("M%s %s A%s %s 0 1 0 %s %s A%s %s 0 1 0 %s %s Z",
+				fmtPrec(svgCx-rx, o.Precision), fmtPrec(svgCy, o.Precision),
+				fmtPrec(rx, o.Precision), fmtPrec(ry, o.Precision),
+				fmtPrec(svgCx+rx, o.Precision), fmtPrec(svgCy, o.Precision),
+				fmtPrec(rx, o.Precision), fmtPrec(ry, o.Precision),
+				fmtPrec(svgCx-rx, o.Precision), fmtPrec(svgCy, o.Precision)))
+			prevX, prevY = svgCx-rx, svgCy
+
 		case "nurbsto":
 			sx, sy := row.X(), row.Y()
 			svgX, svgY := toSVGCoords(sx+ss.offsetX, sy+ss.offsetY, parentH, scaleX, scaleY)
@@ -415,7 +784,7 @@ func renderSubShape(ss renderableShape, parent *Shape, scaleX, scaleY float64, o
 
 	pathData := d.String()
 	if pathData == "" {
-		return "", 0
+		return svgRenderResult{}
 	}
 
 	// Check if path should be closed.
@@ -423,33 +792,44 @@ func renderSubShape(ss renderableShape, parent *Shape, scaleX, scaleY float64, o
 	noLine := geomCellBool(geom, "NoLine")
 	noShow := geomCellBool(geom, "NoShow")
 	if noShow {
-		return "", 0
+		return svgRenderResult{}
 	}
 
 	// Build style attributes.
 	fill := resolveColor(s.FillColor())
 	stroke := resolveColor(s.LineColor())
 	lineWeight := s.LineWeight()
-	opacity := ""
+	var styleAttrs []string
+	var gradientID string
+	var gradient *Gradient
 
-	// Visio default: when FillForegnd is unresolvable but the shape has
-	// an explicit FillPattern (solid) or FillForegndTrans, apply the Visio
-	// default color index 0 (black) — the shape intends to be filled.
-	fillPattern := s.CellValue("FillPattern")
-	if fill == "" {
-		if fillPattern == "1" || s.CellValue("FillForegndTrans") != "" {
-			fill = "#000000"
+	// Check for gradient fill.
+	gradient = s.FillGradient()
+	if gradient != nil && !noFill {
+		// Generate unique gradient ID based on shape ID.
+		gradientID = fmt.Sprintf("grad_%s", s.ID)
+		fill = fmt.Sprintf("url(#%s)", gradientID)
+	} else {
+		// Visio default: when FillForegnd is unresolvable but the shape has
+		// an explicit FillPattern (solid) or FillForegndTrans, apply the Visio
+		// default color index 0 (black) — the shape intends to be filled.
+		fillPattern := s.CellValue("FillPattern")
+		if fill == "" {
+			if fillPattern == "1" || s.CellValue("FillForegndTrans") != "" {
+				fill = "#000000"
+			}
 		}
-	}
 
-	// FillPattern=0 means "no fill" regardless of FillForegnd value.
-	if noFill || fill == "" || fillPattern == "0" {
-		fill = "none"
+		// FillPattern=0 means "no fill" regardless of FillForegnd value.
+		if noFill || fill == "" || fillPattern == "0" {
+			fill = "none"
+		}
 	}
 
 	// LinePattern=0 means "no line" regardless of other line properties.
 	// Empty LineColor means no explicit line was set — don't invent one.
 	linePattern := s.CellValue("LinePattern")
+	linePatternInt := int(toFloat(linePattern))
 	if noLine || linePattern == "0" || stroke == "" {
 		stroke = "none"
 	}
@@ -473,12 +853,71 @@ func renderSubShape(ss renderableShape, parent *Shape, scaleX, scaleY float64, o
 	if fillTrans != "" {
 		transVal := toFloat(fillTrans)
 		if transVal > 0 {
-			opacity = fmt.Sprintf(` fill-opacity="%s"`, fmtPrec(1-transVal, o.Precision))
+			styleAttrs = append(styleAttrs, fmt.Sprintf(`fill-opacity="%s"`, fmtPrec(1-transVal, o.Precision)))
 		}
 	}
 
-	return fmt.Sprintf(`  <path d="%s" fill="%s" stroke="%s" stroke-width="%s"%s/>`,
-		pathData, fill, stroke, fmtPrec(strokeWidth, o.Precision), opacity), strokeWidth
+	// Line pattern (dash array).
+	if stroke != "none" && linePatternInt > 1 {
+		dashArray := linePatternToSVG(linePatternInt, strokeWidth)
+		if dashArray != "" {
+			styleAttrs = append(styleAttrs, fmt.Sprintf(`stroke-dasharray="%s"`, dashArray))
+		}
+	}
+
+	// Arrow markers.
+	var markers []markerRef
+	beginArrow := int(toFloat(s.CellValue("BeginArrow")))
+	endArrow := int(toFloat(s.CellValue("EndArrow")))
+	beginArrowSize := int(toFloat(s.CellValue("BeginArrowSize")))
+	endArrowSize := int(toFloat(s.CellValue("EndArrowSize")))
+
+	if stroke != "none" && beginArrow > 0 {
+		key := arrowMarkerKey(beginArrow, beginArrowSize, stroke, false)
+		markers = append(markers, markerRef{
+			key:       key,
+			arrowType: beginArrow,
+			size:      beginArrowSize,
+			color:     stroke,
+			isEnd:     false,
+		})
+		styleAttrs = append(styleAttrs, fmt.Sprintf(`marker-start="url(#%s)"`, key))
+	}
+	if stroke != "none" && endArrow > 0 {
+		key := arrowMarkerKey(endArrow, endArrowSize, stroke, true)
+		markers = append(markers, markerRef{
+			key:       key,
+			arrowType: endArrow,
+			size:      endArrowSize,
+			color:     stroke,
+			isEnd:     true,
+		})
+		styleAttrs = append(styleAttrs, fmt.Sprintf(`marker-end="url(#%s)"`, key))
+	}
+
+	// Shadow support.
+	var shadowID string
+	shadow := s.ShapeShadow()
+	if shadow != nil {
+		shadowID = fmt.Sprintf("shadow_%s", s.ID)
+		styleAttrs = append(styleAttrs, fmt.Sprintf(`filter="url(#%s)"`, shadowID))
+	}
+
+	// Build the extra attributes string.
+	extraAttrs := ""
+	if len(styleAttrs) > 0 {
+		extraAttrs = " " + strings.Join(styleAttrs, " ")
+	}
+
+	return svgRenderResult{
+		pathSVG:     fmt.Sprintf(`  <path d="%s" fill="%s" stroke="%s" stroke-width="%s"%s/>`, pathData, fill, stroke, fmtPrec(strokeWidth, o.Precision), extraAttrs),
+		strokeWidth: strokeWidth,
+		markers:     markers,
+		gradientID:  gradientID,
+		gradient:    gradient,
+		shadowID:    shadowID,
+		shadow:      shadow,
+	}
 }
 
 // toSVGCoords transforms Visio coordinates (inches, Y-up, bottom-left origin)
@@ -650,6 +1089,75 @@ func clamp(v int) int {
 		return 255
 	}
 	return v
+}
+
+// linePatternToSVG converts a Visio LinePattern value (0-23) to SVG stroke-dasharray.
+// Pattern values are defined in MS-VSDX spec §2.4.4.
+func linePatternToSVG(pattern int, weight float64) string {
+	if weight <= 0 {
+		weight = 1
+	}
+	switch pattern {
+	case 0, 1: // None, Solid
+		return ""
+	case 2: // Dash
+		return fmt.Sprintf("%.2f %.2f", weight*4, weight*2)
+	case 3: // Dot
+		return fmt.Sprintf("%.2f %.2f", weight, weight*2)
+	case 4: // Dash-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f", weight*4, weight*2, weight, weight*2)
+	case 5: // Dash-Dot-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight, weight*2, weight, weight*2)
+	case 6: // Dash-Dash-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight*4, weight*2, weight, weight*2)
+	case 7: // Long Dash
+		return fmt.Sprintf("%.2f %.2f", weight*8, weight*2)
+	case 8: // Long Dash-Short Dash
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f", weight*8, weight*2, weight*2, weight*2)
+	case 9: // Long Dash-Short Dash-Short Dash
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*8, weight*2, weight*2, weight*2, weight*2, weight*2)
+	case 10: // Sparse Dot
+		return fmt.Sprintf("%.2f %.2f", weight, weight*4)
+	case 11: // Dense Dot
+		return fmt.Sprintf("%.2f %.2f", weight, weight)
+	case 12: // Dash-Sparse Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f", weight*4, weight*4, weight, weight*4)
+	case 13: // Dash-Dash-Sparse Dot-Sparse Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight*4, weight*4, weight, weight*4, weight, weight*4)
+	case 14: // Long Dash-Dash
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f", weight*8, weight*2, weight*4, weight*2)
+	case 15: // Long Dash-Dash-Dash
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*8, weight*2, weight*4, weight*2, weight*4, weight*2)
+	case 16: // Dash-Dash-Dot-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight*4, weight*2, weight, weight*2, weight, weight*2)
+	case 17: // Dash-Dot-Dot-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight, weight*2, weight, weight*2, weight, weight*2)
+	case 18: // Dash-Dash-Dash-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight*4, weight*2, weight*4, weight*2, weight, weight*2)
+	case 19: // Dash-Dash-Dash-Dot-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*4, weight*2, weight*4, weight*2, weight*4, weight*2, weight, weight*2, weight, weight*2)
+	case 20: // Long Dot
+		return fmt.Sprintf("%.2f %.2f", weight*2, weight*2)
+	case 21: // Long Dash-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f", weight*8, weight*2, weight, weight*2)
+	case 22: // Long Dash-Dot-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*8, weight*2, weight, weight*2, weight, weight*2)
+	case 23: // Long Dash-Dot-Dot-Dot
+		return fmt.Sprintf("%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f",
+			weight*8, weight*2, weight, weight*2, weight, weight*2, weight, weight*2)
+	default:
+		return ""
+	}
 }
 
 // detectBrandColor finds the most frequent non-white, non-black color.

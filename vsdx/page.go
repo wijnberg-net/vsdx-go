@@ -107,6 +107,95 @@ func (p *Page) Height() float64 {
 	return toFloat(cell.SelectAttrValue("V", ""))
 }
 
+// BackgroundPage returns the background page for this page, or nil if none is set.
+func (p *Page) BackgroundPage() *Page {
+	ps := p.pagesheetXML()
+	if ps == nil {
+		return nil
+	}
+	cell := ps.FindElement("Cell[@N='BackPage']")
+	if cell == nil {
+		return nil
+	}
+	backPageID := cell.SelectAttrValue("V", "")
+	if backPageID == "" {
+		return nil
+	}
+	return p.vis.GetPageByID(backPageID)
+}
+
+// SetBackgroundPage sets the background page for this page.
+// Pass nil to remove the background page.
+func (p *Page) SetBackgroundPage(bg *Page) {
+	ps := p.pagesheetXML()
+	if ps == nil {
+		return
+	}
+
+	cell := ps.FindElement("Cell[@N='BackPage']")
+	if bg == nil {
+		// Remove background page.
+		if cell != nil {
+			ps.RemoveChild(cell)
+		}
+		return
+	}
+
+	// Set background page.
+	if cell == nil {
+		cell = ps.CreateElement("Cell")
+		cell.CreateAttr("N", "BackPage")
+	}
+	cell.CreateAttr("V", bg.PageID())
+}
+
+// AllShapesWithBackground returns all shapes including those from the background page.
+// Background shapes are returned first, followed by foreground shapes.
+func (p *Page) AllShapesWithBackground() []*Shape {
+	var shapes []*Shape
+
+	// Recursively get background shapes first.
+	if bg := p.BackgroundPage(); bg != nil {
+		shapes = append(shapes, bg.AllShapesWithBackground()...)
+	}
+
+	// Then foreground shapes.
+	shapes = append(shapes, p.AllShapes()...)
+	return shapes
+}
+
+// IsBackgroundPage returns true if this page is used as a background for other pages.
+func (p *Page) IsBackgroundPage() bool {
+	ps := p.pagesheetXML()
+	if ps == nil {
+		return false
+	}
+	cell := ps.FindElement("Cell[@N='Background']")
+	if cell == nil {
+		return false
+	}
+	return cell.SelectAttrValue("V", "") == "1"
+}
+
+// SetAsBackgroundPage marks or unmarks this page as a background page.
+func (p *Page) SetAsBackgroundPage(isBackground bool) {
+	ps := p.pagesheetXML()
+	if ps == nil {
+		return
+	}
+
+	cell := ps.FindElement("Cell[@N='Background']")
+	if cell == nil {
+		cell = ps.CreateElement("Cell")
+		cell.CreateAttr("N", "Background")
+	}
+	if isBackground {
+		cell.CreateAttr("V", "1")
+	} else {
+		cell.CreateAttr("V", "0")
+	}
+}
+
 // XML returns the page content XML document.
 func (p *Page) XML() *etree.Document {
 	return p.xml

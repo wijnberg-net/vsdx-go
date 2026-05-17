@@ -12,9 +12,9 @@ vsdx-go/
 │   ├── doc.go                  # Package-level documentatie (61 lines)
 │   │
 │   │── # Core types
-│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1234 lines)
-│   ├── page.go                 # Page: shapes, search, connects, dimensions, layers (476 lines)
-│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie (1575 lines)
+│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1255 lines)
+│   ├── page.go                 # Page: shapes, search, connects, dimensions, layers, backgrounds (565 lines)
+│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie, protection (1596 lines)
 │   ├── cell.go                 # Cell: name/value/formula triple (43 lines)
 │   ├── connect.go              # Connect: from/to shape relaties (52 lines)
 │   ├── data_property.go        # DataProperty: custom shape properties met master inheritance (123 lines)
@@ -22,24 +22,36 @@ vsdx-go/
 │   │── # Geometry
 │   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paden + builders (543 lines)
 │   │
+│   │── # SVG Rendering
+│   ├── svg.go                  # ShapeToSVG: SVG rendering met arrows, text, line patterns (1522 lines)
+│   ├── gradient.go             # Gradient: fill gradients voor shapes (175 lines)
+│   ├── shadow.go               # Shadow: drop shadow effecten (116 lines)
+│   │
 │   │── # Features
-│   ├── foreign.go              # AddImage, AddShape, GroupShapes, SetForeignData (421 lines)
+│   ├── foreign.go              # AddImage, AddShape, GroupShapes, SetForeignData (425 lines)
 │   ├── template.go             # RenderTemplate: Jinja2-achtige directives (490 lines)
 │   ├── diff.go                 # VisioFileDiff: twee .vsdx bestanden vergelijken (241 lines)
-│   ├── svg.go                  # ShapeToSVG: SVG rendering van shapes (1014 lines)
 │   ├── media.go                # Media: embedded template shapes voor connectors (67 lines)
 │   ├── formula.go              # FormulaEvaluator: volledige formule-evaluatie (600 lines)
+│   ├── routing.go              # Router: A* pathfinding voor auto-routing connectors (414 lines)
+│   ├── export.go               # ExportPNG, ExportPDF: raster/vector export via externe tools (284 lines)
+│   ├── validate.go             # Validate: schema validation en error recovery (232 lines)
+│   │
+│   │── # Stencils & Masters
+│   ├── master.go               # CreateMaster, DeleteMaster, DuplicateMaster (305 lines)
+│   ├── stencil.go              # Stencil: .vssx stencil bestanden (357 lines)
+│   ├── theme.go                # Theme: document themes en QuickStyle kleuren (331 lines)
 │   │
 │   │── # Support
 │   ├── cellname.go             # CellName constants: 40+ cel definities (83 lines)
 │   ├── errors.go               # Sentinel errors: ErrInvalidFileType, FileError (27 lines)
-│   ├── types.go                # Result structs: Point, Rect (11 lines)
+│   ├── types.go                # Result structs: Point, Rect (27 lines)
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   ├── vsdx_test.go            # 172 test cases (5959 lines)
+│   ├── vsdx_test.go            # 220+ test cases (6148 lines)
 │   ├── foreign_test.go         # 10 test cases (726 lines)
-│   └── svg_test.go             # 25 test cases (612 lines)
+│   └── svg_test.go             # 30+ test cases (671 lines)
 │
 ├── cmd/stencil-diag/main.go    # Diagnostic tool voor stencil bestanden
 ├── tests/                      # Test fixture .vsdx bestanden (15+ files)
@@ -83,13 +95,19 @@ Dit geldt voor cells, text, data properties, en geometry.
 | Type | Bestand | Verantwoordelijkheid |
 |------|---------|---------------------|
 | `VisioFile` | `vsdxfile.go` | Hoofd-entrypoint: ZIP openen/opslaan, pagina-beheer |
-| `Page` | `page.go` | Pagina of master-pagina: shapes, connects, afmetingen, layers |
+| `Page` | `page.go` | Pagina of master-pagina: shapes, connects, afmetingen, layers, backgrounds |
 | `Shape` | `shape.go` | Shape of groep: tekst, positie, stijl, cellen, hiërarchie, protection |
 | `ShapeParent` | `shape.go` | Interface voor Shape.Parent (`*Page` of `*Shape`) |
 | `Cell` | `cell.go` | Naam/waarde/formule paar uit XML Cell element |
 | `DataProperty` | `data_property.go` | Custom properties met master inheritance |
 | `Connect` | `connect.go` | Verbinding tussen twee shapes |
 | `Geometry` | `geometry.go` | Shape pad-definitie + builders (MoveTo, LineTo, ArcTo, etc.) |
+| `Gradient` | `gradient.go` | Fill gradient met stops en angle |
+| `Shadow` | `shadow.go` | Drop shadow met offset, blur, kleur |
+| `Theme` | `theme.go` | Document theme met kleuren en fonts |
+| `Stencil` | `stencil.go` | .vssx stencil bestand met masters |
+| `Router` | `routing.go` | A* pathfinding voor connector routing |
+| `ValidationResult` | `validate.go` | Schema validation resultaten |
 | `Point`, `Rect` | `types.go` | Gestructureerde return waarden |
 | `CellName` | `cellname.go` | Type alias + 40+ constants voor cell namen |
 | `FileError` | `errors.go` | Error type met path en wrapping |
@@ -181,10 +199,15 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
 
 ## Huidige Status
 
-- 19 Go source bestanden, ~5919 lines code + ~6300 lines tests = ~12219 total
-- 207 test cases (alle passing), 88.6% code coverage
-- ~65% MS-VSDX spec coverage (15 van 17 secties + volledige formule-evaluatie)
+- 26 Go source bestanden, ~10,000+ lines code + ~7,500 lines tests = ~17,600 total
+- 220+ test cases (alle passing), 68% code coverage
+- ~90% MS-VSDX spec coverage (alle 17 secties + volledige formule-evaluatie)
 - Alle fasen compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
+- **Rendering features**: SVG met line patterns (24 types), arrow markers (45+ types), 
+  gradient fills, drop shadows, text positioning, ellipse geometry
+- **Authoring features**: master shapes aanmaken/verwijderen, stencils (.vssx), themes
+- **Advanced features**: auto-routing connectors (A* pathfinding), PNG/PDF export,
+  background pages, schema validation, error recovery
 - Netwerk-diagram features: character/paragraph formatting, fill transparency, line patterns,
   geometry builders, layers, hyperlinks, connection points, protection, user-defined cells
 - Idiomatisch Go: cell constants, sentinel errors, typed interfaces, result structs

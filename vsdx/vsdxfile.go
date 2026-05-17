@@ -354,6 +354,16 @@ func (v *VisioFile) GetPageByName(name string) *Page {
 	return nil
 }
 
+// GetPageByID returns the page with the given ID, or nil.
+func (v *VisioFile) GetPageByID(id string) *Page {
+	for _, p := range v.Pages {
+		if p.pageID == id {
+			return p
+		}
+	}
+	return nil
+}
+
 // GetMasterPageByID returns the master page with the given ID, or nil.
 func (v *VisioFile) GetMasterPageByID(id string) *Page {
 	for _, m := range v.MasterPages {

@@ -3076,14 +3076,14 @@ func TestNetworkShapeInfo(t *testing.T) {
 	// Shape.BoundsRect()
 	rect := r1.BoundsRect()
 	bx, by, ex, ey := r1.Bounds()
-	if rect.BeginX != bx || rect.BeginY != by || rect.EndX != ex || rect.EndY != ey {
+	if rect.X != bx || rect.Y != by || rect.EndX() != ex || rect.EndY() != ey {
 		t.Errorf("BoundsRect mismatch with Bounds()")
 	}
 
 	// Shape.RelativeBoundsRect()
 	relRect := r1.RelativeBoundsRect()
 	rbx, rby, rex, rey := r1.RelativeBounds()
-	if relRect.BeginX != rbx || relRect.BeginY != rby || relRect.EndX != rex || relRect.EndY != rey {
+	if relRect.X != rbx || relRect.Y != rby || relRect.EndX() != rex || relRect.EndY() != rey {
 		t.Errorf("RelativeBoundsRect mismatch with RelativeBounds()")
 	}
 
@@ -5956,4 +5956,193 @@ func TestSectionRoundTrip(t *testing.T) {
 	}
 
 	t.Log("All sections persisted correctly after round-trip")
+}
+
+func TestGradientToSVGDef(t *testing.T) {
+	grad := &Gradient{
+		Enabled: true,
+		Type:    "linear",
+		Angle:   0,
+		Stops: []GradientStop{
+			{Position: 0, Color: "#FF0000", Trans: 0},
+			{Position: 1, Color: "#0000FF", Trans: 0},
+		},
+	}
+
+	svg := gradientToSVGDef(grad, "test-grad", 2)
+	if svg == "" {
+		t.Error("expected non-empty SVG")
+	}
+	if !strings.Contains(svg, "linearGradient") {
+		t.Error("expected linearGradient element")
+	}
+	if !strings.Contains(svg, "#FF0000") {
+		t.Error("expected first stop color")
+	}
+	if !strings.Contains(svg, "#0000FF") {
+		t.Error("expected second stop color")
+	}
+
+	// Test radial gradient
+	radial := &Gradient{
+		Enabled: true,
+		Type:    "radial",
+		Stops: []GradientStop{
+			{Position: 0, Color: "#FFFFFF", Trans: 0},
+			{Position: 1, Color: "#000000", Trans: 0.5},
+		},
+	}
+	radialSVG := gradientToSVGDef(radial, "test-radial", 2)
+	if !strings.Contains(radialSVG, "radialGradient") {
+		t.Error("expected radialGradient element")
+	}
+}
+
+func TestShadowToSVGFilter(t *testing.T) {
+	shadow := &Shadow{
+		Type:    1,
+		OffsetX: 0.1,
+		OffsetY: -0.1,
+		Color:   "#000000",
+		Opacity: 0.5,
+		Blur:    0.05,
+	}
+
+	svg := shadowToSVGFilter(shadow, "test-shadow", 100, 100, 2)
+	if svg == "" {
+		t.Error("expected non-empty SVG")
+	}
+	if !strings.Contains(svg, "filter") {
+		t.Error("expected filter element")
+	}
+	if !strings.Contains(svg, "feDropShadow") {
+		t.Error("expected feDropShadow element")
+	}
+
+	// Test nil shadow
+	nilSVG := shadowToSVGFilter(nil, "nil", 100, 100, 2)
+	if nilSVG != "" {
+		t.Error("expected empty SVG for nil shadow")
+	}
+
+	// Test no shadow
+	noShadow := &Shadow{Type: 0}
+	noShadowSVG := shadowToSVGFilter(noShadow, "none", 100, 100, 2)
+	if noShadowSVG != "" {
+		t.Error("expected empty SVG for Type 0")
+	}
+}
+
+func TestGenerateUUID(t *testing.T) {
+	uuid1 := generateUUID()
+	uuid2 := generateUUID()
+
+	if uuid1 == "" {
+		t.Error("UUID should not be empty")
+	}
+	if uuid1 == uuid2 {
+		t.Error("UUIDs should be unique")
+	}
+	if !strings.HasPrefix(uuid1, "{") || !strings.HasSuffix(uuid1, "}") {
+		t.Error("UUID should be wrapped in braces")
+	}
+	if len(uuid1) != 38 { // {8-4-4-4-12}
+		t.Errorf("UUID length = %d, want 38", len(uuid1))
+	}
+}
+
+func TestValidate(t *testing.T) {
+	vis, err := Open("../tests/basic-001.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	result := vis.Validate()
+	if result == nil {
+		t.Fatal("Validate() returned nil")
+	}
+
+	// Basic file should be valid
+	if !result.IsValid() {
+		t.Errorf("basic-001.vsdx should be valid, got %d errors", len(result.Errors))
+		for _, e := range result.Errors {
+			t.Logf("  Error: %v", e)
+		}
+	}
+}
+
+func TestDefaultRouteOptions(t *testing.T) {
+	opts := DefaultRouteOptions()
+	if !opts.Orthogonal {
+		t.Error("default Orthogonal should be true")
+	}
+	if opts.Padding <= 0 {
+		t.Error("default Padding should be positive")
+	}
+	if opts.GridSize <= 0 {
+		t.Error("default GridSize should be positive")
+	}
+}
+
+func TestBoundingBox(t *testing.T) {
+	vis, err := Open("../tests/basic-001.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Skip("no shapes in test file")
+	}
+
+	bbox := shapes[0].BoundingBox()
+	if bbox.Width <= 0 || bbox.Height <= 0 {
+		// Only check if shape has dimensions
+		if shapes[0].Width() > 0 {
+			t.Errorf("BoundingBox should have positive dimensions, got width=%v height=%v", bbox.Width, bbox.Height)
+		}
+	}
+}
+
+func TestBackgroundPage(t *testing.T) {
+	vis, err := Open("../tests/basic-001.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	page := vis.Pages[0]
+	
+	// Most pages don't have a background
+	bg := page.BackgroundPage()
+	// Just verify it doesn't crash
+	_ = bg
+	
+	// Check IsBackgroundPage (should be false for regular page)
+	if page.IsBackgroundPage() {
+		// Could be true if the test file has background pages
+		t.Log("page is a background page")
+	}
+}
+
+func TestCreateStencil(t *testing.T) {
+	st := CreateStencil()
+	if st == nil {
+		t.Fatal("CreateStencil() returned nil")
+	}
+	if len(st.Masters) != 0 {
+		t.Errorf("new stencil should have 0 masters, got %d", len(st.Masters))
+	}
+	if st.ZipFileContents == nil {
+		t.Error("ZipFileContents should not be nil")
+	}
+}
+
+func TestExportOptions(t *testing.T) {
+	opts := DefaultExportOptions()
+	if opts.DPI != 96 {
+		t.Errorf("default DPI = %v, want 96", opts.DPI)
+	}
 }
