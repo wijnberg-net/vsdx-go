@@ -300,6 +300,77 @@ func renderSubShape(ss renderableShape, parent *Shape, scaleX, scaleY float64, o
 			d.WriteString(fmt.Sprintf("L%s %s", fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision)))
 			prevX, prevY = svgX, svgY
 
+		case "relellipticalarcto":
+			rx, ry := row.X(), row.Y()
+			absX := rx*ss.localW + ss.offsetX
+			absY := ry*ss.localH + ss.offsetY
+			svgX, svgY := toSVGCoords(absX, absY, parentH, scaleX, scaleY)
+			// Approximate as line (same as absolute version)
+			d.WriteString(fmt.Sprintf("L%s %s", fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision)))
+			prevX, prevY = svgX, svgY
+
+		case "relcubbezto":
+			// RelCubBezTo: cubic bezier with relative coords (0-1 fractions)
+			rx, ry := row.X(), row.Y()
+			absX := rx*ss.localW + ss.offsetX
+			absY := ry*ss.localH + ss.offsetY
+			svgX, svgY := toSVGCoords(absX, absY, parentH, scaleX, scaleY)
+			// A, B = first control point; C, D = second control point
+			cp1X := cellFloat(row, "A")*ss.localW + ss.offsetX
+			cp1Y := cellFloat(row, "B")*ss.localH + ss.offsetY
+			cp2X := cellFloat(row, "C")*ss.localW + ss.offsetX
+			cp2Y := cellFloat(row, "D")*ss.localH + ss.offsetY
+			cp1SvgX, cp1SvgY := toSVGCoords(cp1X, cp1Y, parentH, scaleX, scaleY)
+			cp2SvgX, cp2SvgY := toSVGCoords(cp2X, cp2Y, parentH, scaleX, scaleY)
+			d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
+				fmtPrec(cp1SvgX, o.Precision), fmtPrec(cp1SvgY, o.Precision),
+				fmtPrec(cp2SvgX, o.Precision), fmtPrec(cp2SvgY, o.Precision),
+				fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision)))
+			prevX, prevY = svgX, svgY
+
+		case "relquadbezto":
+			// RelQuadBezTo: quadratic bezier with relative coords (0-1 fractions)
+			rx, ry := row.X(), row.Y()
+			absX := rx*ss.localW + ss.offsetX
+			absY := ry*ss.localH + ss.offsetY
+			svgX, svgY := toSVGCoords(absX, absY, parentH, scaleX, scaleY)
+			// A, B = control point
+			cpX := cellFloat(row, "A")*ss.localW + ss.offsetX
+			cpY := cellFloat(row, "B")*ss.localH + ss.offsetY
+			cpSvgX, cpSvgY := toSVGCoords(cpX, cpY, parentH, scaleX, scaleY)
+			d.WriteString(fmt.Sprintf("Q%s %s %s %s",
+				fmtPrec(cpSvgX, o.Precision), fmtPrec(cpSvgY, o.Precision),
+				fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision)))
+			prevX, prevY = svgX, svgY
+
+		case "polylineto":
+			// PolylineTo: A cell contains POLYLINE formula with vertex list
+			sx, sy := row.X(), row.Y()
+			svgX, svgY := toSVGCoords(sx+ss.offsetX, sy+ss.offsetY, parentH, scaleX, scaleY)
+			// Parse A cell for intermediate points and draw lines
+			aFormula := cellString(row, "A")
+			pts := parsePolylinePoints(aFormula, ss.localW, ss.localH, ss.offsetX, ss.offsetY)
+			for _, pt := range pts {
+				ptSvgX, ptSvgY := toSVGCoords(pt.x, pt.y, parentH, scaleX, scaleY)
+				d.WriteString(fmt.Sprintf("L%s %s", fmtPrec(ptSvgX, o.Precision), fmtPrec(ptSvgY, o.Precision)))
+				prevX, prevY = ptSvgX, ptSvgY
+			}
+			// Final point
+			d.WriteString(fmt.Sprintf("L%s %s", fmtPrec(svgX, o.Precision), fmtPrec(svgY, o.Precision)))
+			prevX, prevY = svgX, svgY
+
+		case "infiniteline":
+			// InfiniteLine: two points defining an infinite line; render as line segment
+			sx, sy := row.X(), row.Y()
+			ax := cellFloat(row, "A")
+			ay := cellFloat(row, "B")
+			svgX1, svgY1 := toSVGCoords(sx+ss.offsetX, sy+ss.offsetY, parentH, scaleX, scaleY)
+			svgX2, svgY2 := toSVGCoords(ax+ss.offsetX, ay+ss.offsetY, parentH, scaleX, scaleY)
+			d.WriteString(fmt.Sprintf("M%s %s L%s %s",
+				fmtPrec(svgX1, o.Precision), fmtPrec(svgY1, o.Precision),
+				fmtPrec(svgX2, o.Precision), fmtPrec(svgY2, o.Precision)))
+			prevX, prevY = svgX2, svgY2
+
 		case "nurbsto":
 			sx, sy := row.X(), row.Y()
 			svgX, svgY := toSVGCoords(sx+ss.offsetX, sy+ss.offsetY, parentH, scaleX, scaleY)
@@ -635,6 +706,56 @@ func parseNURBSControlPoints(formula string) []nurbsControlPoint {
 		cps = append(cps, nurbsControlPoint{x: x, y: y})
 	}
 	return cps
+}
+
+// polylinePoint represents a vertex in a polyline.
+type polylinePoint struct {
+	x, y float64
+}
+
+// parsePolylinePoints extracts vertices from a POLYLINE() formula string.
+// Format: POLYLINE(xType, yType, x1,y1, x2,y2, ...)
+// Returns the (x,y) points, converted to absolute coordinates.
+func parsePolylinePoints(formula string, localW, localH, offsetX, offsetY float64) []polylinePoint {
+	formula = strings.TrimSpace(formula)
+	upper := strings.ToUpper(formula)
+	if !strings.HasPrefix(upper, "POLYLINE(") || !strings.HasSuffix(formula, ")") {
+		return nil
+	}
+	inner := formula[9 : len(formula)-1]
+
+	parts := strings.Split(inner, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+
+	// Need at least xType, yType + at least one point (2 coords)
+	if len(parts) < 4 {
+		return nil
+	}
+
+	// xType and yType: 0 = proportional (0-1), 1 = absolute inches
+	xType := toFloat(parts[0])
+	yType := toFloat(parts[1])
+
+	var pts []polylinePoint
+	for i := 2; i+1 < len(parts); i += 2 {
+		x := toFloat(parts[i])
+		y := toFloat(parts[i+1])
+		// Convert to absolute coordinates
+		if xType == 0 {
+			x = x*localW + offsetX
+		} else {
+			x = x + offsetX
+		}
+		if yType == 0 {
+			y = y*localH + offsetY
+		} else {
+			y = y + offsetY
+		}
+		pts = append(pts, polylinePoint{x: x, y: y})
+	}
+	return pts
 }
 
 // cellString returns the string value of a named cell in a geometry row.

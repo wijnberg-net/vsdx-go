@@ -197,6 +197,130 @@ func (g *Geometry) AddEllipticalArcTo(x, y, a, b, c, d float64) {
 	g.Rows[ix] = newGeometryRow(g, row, nil)
 }
 
+// AddRelEllipticalArcTo adds a RelEllipticalArcTo row with relative coordinates (0-1 range).
+// (x, y) is the endpoint, a is the control point X, b is the control point Y,
+// c is the major/minor ratio, d is the angle of the major axis.
+func (g *Geometry) AddRelEllipticalArcTo(x, y, a, b, c, d float64) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "RelEllipticalArcTo")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	addCellXML(row, "B", fmtFloat(b), "")
+	addCellXML(row, "C", fmtFloat(c), "")
+	addCellXML(row, "D", fmtFloat(d), "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddRelCubBezTo adds a RelCubBezTo row for a relative cubic Bezier curve.
+// (x, y) is the endpoint, (a, b) is the first control point, (c, d) is the second control point.
+// All coordinates are relative to shape bounds (0-1 range).
+func (g *Geometry) AddRelCubBezTo(x, y, a, b, c, d float64) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "RelCubBezTo")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	addCellXML(row, "B", fmtFloat(b), "")
+	addCellXML(row, "C", fmtFloat(c), "")
+	addCellXML(row, "D", fmtFloat(d), "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddRelQuadBezTo adds a RelQuadBezTo row for a relative quadratic Bezier curve.
+// (x, y) is the endpoint, (a, b) is the control point.
+// All coordinates are relative to shape bounds (0-1 range).
+func (g *Geometry) AddRelQuadBezTo(x, y, a, b float64) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "RelQuadBezTo")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	addCellXML(row, "B", fmtFloat(b), "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddNURBSTo adds a NURBSTo row for a NURBS curve segment.
+// (x, y) is the endpoint, a is the second-to-last knot, b is the last weight,
+// c is the first knot, d is the first weight, e is the NURBS formula string.
+func (g *Geometry) AddNURBSTo(x, y, a, b, c, d float64, e string) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "NURBSTo")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	addCellXML(row, "B", fmtFloat(b), "")
+	addCellXML(row, "C", fmtFloat(c), "")
+	addCellXML(row, "D", fmtFloat(d), "")
+	addCellXML(row, "E", e, "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddPolylineTo adds a PolylineTo row for a polyline defined by a formula string.
+// (x, y) is the endpoint, a is the polyline formula (e.g., "POLYLINE(...)").
+func (g *Geometry) AddPolylineTo(x, y float64, a string) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "PolylineTo")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", a, "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddSplineStart adds a SplineStart row that begins a spline.
+// (x, y) is the second control point, a is the second knot,
+// b is the first knot, c is the last knot, d is the degree.
+func (g *Geometry) AddSplineStart(x, y, a, b, c float64, d int) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "SplineStart")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	addCellXML(row, "B", fmtFloat(b), "")
+	addCellXML(row, "C", fmtFloat(c), "")
+	addCellXML(row, "D", strconv.Itoa(d), "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddSplineKnot adds a SplineKnot row that continues a spline.
+// (x, y) is the control point, a is the knot value.
+func (g *Geometry) AddSplineKnot(x, y, a float64) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "SplineKnot")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
+// AddInfiniteLine adds an InfiniteLine row that defines an infinite line.
+// (x, y) is a point on the line, (a, b) is a second point on the line.
+func (g *Geometry) AddInfiniteLine(x, y, a, b float64) {
+	ix := g.nextIX()
+	row := g.xml.CreateElement("Row")
+	row.CreateAttr("T", "InfiniteLine")
+	row.CreateAttr("IX", ix)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "A", fmtFloat(a), "")
+	addCellXML(row, "B", fmtFloat(b), "")
+	g.Rows[ix] = newGeometryRow(g, row, nil)
+}
+
 // GeometryRow represents a row within a Geometry section.
 // Each row has a type (T attribute) and index (IX attribute), and contains Cell elements.
 type GeometryRow struct {

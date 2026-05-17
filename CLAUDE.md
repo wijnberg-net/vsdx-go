@@ -14,21 +14,21 @@ vsdx-go/
 │   │── # Core types
 │   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1234 lines)
 │   ├── page.go                 # Page: shapes, search, connects, dimensions, layers (476 lines)
-│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie (1193 lines)
+│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie (1575 lines)
 │   ├── cell.go                 # Cell: name/value/formula triple (43 lines)
 │   ├── connect.go              # Connect: from/to shape relaties (52 lines)
 │   ├── data_property.go        # DataProperty: custom shape properties met master inheritance (123 lines)
 │   │
 │   │── # Geometry
-│   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paden + builders (385 lines)
+│   ├── geometry.go             # Geometry, GeometryRow, GeometryCell: shape paden + builders (543 lines)
 │   │
 │   │── # Features
 │   ├── foreign.go              # AddImage, AddShape, GroupShapes, SetForeignData (421 lines)
 │   ├── template.go             # RenderTemplate: Jinja2-achtige directives (490 lines)
 │   ├── diff.go                 # VisioFileDiff: twee .vsdx bestanden vergelijken (241 lines)
-│   ├── svg.go                  # ShapeToSVG: SVG rendering van shapes (893 lines)
+│   ├── svg.go                  # ShapeToSVG: SVG rendering van shapes (1014 lines)
 │   ├── media.go                # Media: embedded template shapes voor connectors (67 lines)
-│   ├── formula.go              # CalcValue: formule-evaluatie (35 lines)
+│   ├── formula.go              # FormulaEvaluator: volledige formule-evaluatie (600 lines)
 │   │
 │   │── # Support
 │   ├── cellname.go             # CellName constants: 40+ cel definities (83 lines)
@@ -37,9 +37,9 @@ vsdx-go/
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   ├── vsdx_test.go            # 124 test cases (3825 lines)
-│   ├── foreign_test.go         # 10 test cases (727 lines)
-│   └── svg_test.go             # 24 test cases (541 lines)
+│   ├── vsdx_test.go            # 172 test cases (5959 lines)
+│   ├── foreign_test.go         # 10 test cases (726 lines)
+│   └── svg_test.go             # 25 test cases (612 lines)
 │
 ├── cmd/stencil-diag/main.go    # Diagnostic tool voor stencil bestanden
 ├── tests/                      # Test fixture .vsdx bestanden (15+ files)
@@ -115,6 +115,11 @@ De library leest en schrijft de volgende VSDX shape secties:
 | **Protection** | ✓ | ✓ | `SetLockMove`, `SetLockSize`, `SetLockDelete`, `SetLockRotate`, `SetLockAspect` |
 | **User** | ✓ | ✓ | `AddUserCell(name, value)`, `UserCellValue(name)` |
 | **ForeignData** | ✓ | ✓ | `AddImage`, `SetForeignData` |
+| **Scratch** | ✓ | ✓ | `ScratchCells()`, `AddScratchCell(x, y, a, b, c, d)` |
+| **Actions** | ✓ | ✓ | `Actions()`, `AddAction(name, menu, action)` |
+| **Field** | ✓ | ✓ | `Fields()`, `AddField(type, value, format)` |
+| **Control** | ✓ | ✓ | `Controls()`, `AddControl(name, x, y, tip)` |
+| **Tabs** | ✓ | ✓ | `TabStops()`, `AddTabStop(position, alignment)` |
 
 ## VSDX Bestandsformaat
 
@@ -171,14 +176,14 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
   - §2.2.5.3.3.1 Cell Default Values
   - §2.2.11.2 Formulas - volledige formule grammatica
   - §2.2.5.4 Inheritance - 5 types (wij ondersteunen master-to-shape)
-  - §2.4.2 GeometryRowTypes - 15 types (wij: MoveTo, LineTo, RelMoveTo, RelLineTo, ArcTo)
+  - §2.4.2 GeometryRowTypes - 15 types (wij: MoveTo, LineTo, RelMoveTo, RelLineTo, ArcTo, EllipticalArcTo, RelEllipticalArcTo, RelCubBezTo, RelQuadBezTo, NURBSTo, PolylineTo, SplineStart, SplineKnot, InfiniteLine)
   - §2.4.4 Cells - complete catalogus van cel definities
 
 ## Huidige Status
 
-- 19 Go source bestanden, ~5864 lines code + ~5273 lines tests = ~11137 total
-- 158 test cases (alle passing), 85.9% code coverage
-- ~50-55% MS-VSDX spec coverage (10 van 17 secties geïmplementeerd)
+- 19 Go source bestanden, ~5919 lines code + ~6300 lines tests = ~12219 total
+- 207 test cases (alle passing), 88.6% code coverage
+- ~65% MS-VSDX spec coverage (15 van 17 secties + volledige formule-evaluatie)
 - Alle fasen compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
 - Netwerk-diagram features: character/paragraph formatting, fill transparency, line patterns,
   geometry builders, layers, hyperlinks, connection points, protection, user-defined cells

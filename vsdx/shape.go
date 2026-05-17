@@ -653,6 +653,382 @@ func (s *Shape) SetLayerMember(layers string) {
 	s.SetCellValue(CellLayerMember, layers)
 }
 
+// --- Scratch Section ---
+
+// ScratchCell represents a scratch cell row in the Scratch section.
+type ScratchCell struct {
+	Row   int
+	X     string
+	Y     string
+	A     string
+	B     string
+	C     string
+	D     string
+}
+
+// ScratchCells returns all scratch cells from this shape.
+func (s *Shape) ScratchCells() []ScratchCell {
+	section := s.xml.FindElement("Section[@N='Scratch']")
+	if section == nil {
+		return nil
+	}
+	var result []ScratchCell
+	for _, row := range section.SelectElements("Row") {
+		ix, _ := strconv.Atoi(row.SelectAttrValue("IX", "0"))
+		sc := ScratchCell{Row: ix}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "X":
+				sc.X = val
+			case "Y":
+				sc.Y = val
+			case "A":
+				sc.A = val
+			case "B":
+				sc.B = val
+			case "C":
+				sc.C = val
+			case "D":
+				sc.D = val
+			}
+		}
+		result = append(result, sc)
+	}
+	return result
+}
+
+// AddScratchCell adds a scratch cell row with the given values.
+// Scratch cells are used for intermediate calculations and temporary storage.
+func (s *Shape) AddScratchCell(x, y, a, b, c, d string) int {
+	section := s.xml.FindElement("Section[@N='Scratch']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "Scratch")
+	}
+
+	maxIX := -1
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "")); err == nil && ix > maxIX {
+			maxIX = ix
+		}
+	}
+	ix := maxIX + 1
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", strconv.Itoa(ix))
+	if x != "" {
+		addCellXML(row, "X", x, "")
+	}
+	if y != "" {
+		addCellXML(row, "Y", y, "")
+	}
+	if a != "" {
+		addCellXML(row, "A", a, "")
+	}
+	if b != "" {
+		addCellXML(row, "B", b, "")
+	}
+	if c != "" {
+		addCellXML(row, "C", c, "")
+	}
+	if d != "" {
+		addCellXML(row, "D", d, "")
+	}
+	return ix
+}
+
+// --- Actions Section ---
+
+// Action represents a row in the Actions section (right-click menu items).
+type Action struct {
+	Name        string
+	Menu        string
+	Action      string
+	Checked     bool
+	Disabled    bool
+	ReadOnly    bool
+	Invisible   bool
+	BeginGroup  bool
+	TagName     string
+	ButtonFace  string
+	SortKey     string
+}
+
+// Actions returns all action rows from this shape.
+func (s *Shape) Actions() []Action {
+	section := s.xml.FindElement("Section[@N='Actions']")
+	if section == nil {
+		return nil
+	}
+	var result []Action
+	for _, row := range section.SelectElements("Row") {
+		a := Action{Name: row.SelectAttrValue("N", "")}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "Menu":
+				a.Menu = val
+			case "Action":
+				a.Action = val
+			case "Checked":
+				a.Checked = val == "1"
+			case "Disabled":
+				a.Disabled = val == "1"
+			case "ReadOnly":
+				a.ReadOnly = val == "1"
+			case "Invisible":
+				a.Invisible = val == "1"
+			case "BeginGroup":
+				a.BeginGroup = val == "1"
+			case "TagName":
+				a.TagName = val
+			case "ButtonFace":
+				a.ButtonFace = val
+			case "SortKey":
+				a.SortKey = val
+			}
+		}
+		result = append(result, a)
+	}
+	return result
+}
+
+// AddAction adds an action (right-click menu item) to the shape.
+// name is a unique identifier, menu is the display text, action is the formula to execute.
+func (s *Shape) AddAction(name, menu, action string) {
+	section := s.xml.FindElement("Section[@N='Actions']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "Actions")
+	}
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("N", name)
+	addCellXML(row, "Menu", menu, "")
+	addCellXML(row, "Action", "", action) // Action is typically a formula
+	addCellXML(row, "Checked", "0", "")
+	addCellXML(row, "Disabled", "0", "")
+	addCellXML(row, "ReadOnly", "0", "")
+	addCellXML(row, "Invisible", "0", "")
+	addCellXML(row, "BeginGroup", "0", "")
+}
+
+// --- Field Section ---
+
+// Field represents a text field in the shape.
+type Field struct {
+	Row       int
+	Value     string
+	Format    string
+	Type      int // 0=String, 2=Numeric, 5=DateTime, 7=Duration
+	UICategory int
+	UICode    int
+	UIFormat  int
+	Calendar  int
+	ObjectKind int
+}
+
+// Fields returns all field rows from this shape.
+func (s *Shape) Fields() []Field {
+	section := s.xml.FindElement("Section[@N='Field']")
+	if section == nil {
+		return nil
+	}
+	var result []Field
+	for _, row := range section.SelectElements("Row") {
+		ix, _ := strconv.Atoi(row.SelectAttrValue("IX", "0"))
+		f := Field{Row: ix}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "Value":
+				f.Value = val
+			case "Format":
+				f.Format = val
+			case "Type":
+				f.Type, _ = strconv.Atoi(val)
+			case "UICat":
+				f.UICategory, _ = strconv.Atoi(val)
+			case "UICod":
+				f.UICode, _ = strconv.Atoi(val)
+			case "UIFmt":
+				f.UIFormat, _ = strconv.Atoi(val)
+			case "Calendar":
+				f.Calendar, _ = strconv.Atoi(val)
+			case "ObjectKind":
+				f.ObjectKind, _ = strconv.Atoi(val)
+			}
+		}
+		result = append(result, f)
+	}
+	return result
+}
+
+// AddField adds a text field to the shape.
+// fieldType: 0=custom string, 2=numeric, 5=date/time
+// value is the field value or formula.
+func (s *Shape) AddField(fieldType int, value, format string) int {
+	section := s.xml.FindElement("Section[@N='Field']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "Field")
+	}
+
+	maxIX := -1
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "")); err == nil && ix > maxIX {
+			maxIX = ix
+		}
+	}
+	ix := maxIX + 1
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", strconv.Itoa(ix))
+	addCellXML(row, "Value", value, "")
+	addCellXML(row, "Format", format, "")
+	addCellXML(row, "Type", strconv.Itoa(fieldType), "")
+	return ix
+}
+
+// --- Control Section ---
+
+// Control represents a control handle on the shape.
+type Control struct {
+	Name      string
+	X         float64
+	Y         float64
+	XDyn      string
+	YDyn      string
+	XCon      int
+	YCon      int
+	CanGlue   bool
+	Tip       string
+}
+
+// Controls returns all control handles from this shape.
+func (s *Shape) Controls() []Control {
+	section := s.xml.FindElement("Section[@N='Control']")
+	if section == nil {
+		return nil
+	}
+	var result []Control
+	for _, row := range section.SelectElements("Row") {
+		c := Control{Name: row.SelectAttrValue("N", "")}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "X":
+				c.X = toFloat(val)
+			case "Y":
+				c.Y = toFloat(val)
+			case "XDyn":
+				c.XDyn = val
+			case "YDyn":
+				c.YDyn = val
+			case "XCon":
+				c.XCon, _ = strconv.Atoi(val)
+			case "YCon":
+				c.YCon, _ = strconv.Atoi(val)
+			case "CanGlue":
+				c.CanGlue = val == "1"
+			case "Prompt":
+				c.Tip = val
+			}
+		}
+		result = append(result, c)
+	}
+	return result
+}
+
+// AddControl adds a control handle to the shape at the given coordinates.
+// name is a unique identifier, tip is the tooltip shown when hovering.
+func (s *Shape) AddControl(name string, x, y float64, tip string) {
+	section := s.xml.FindElement("Section[@N='Control']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "Control")
+	}
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("N", name)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "XDyn", fmtFloat(x), "")
+	addCellXML(row, "YDyn", fmtFloat(y), "")
+	addCellXML(row, "XCon", "0", "")
+	addCellXML(row, "YCon", "0", "")
+	addCellXML(row, "CanGlue", "0", "")
+	if tip != "" {
+		addCellXML(row, "Prompt", tip, "")
+	}
+}
+
+// --- Tabs Section ---
+
+// TabStop represents a tab stop in the shape's text.
+type TabStop struct {
+	Row       int
+	Position  float64
+	Alignment int // 0=left, 1=center, 2=right, 3=decimal, 4=bar
+	Leader    int // 0=none, 1=dots, 2=dashes, 3=underline
+}
+
+// TabStops returns all tab stops from this shape.
+func (s *Shape) TabStops() []TabStop {
+	section := s.xml.FindElement("Section[@N='Tabs']")
+	if section == nil {
+		return nil
+	}
+	var result []TabStop
+	for _, row := range section.SelectElements("Row") {
+		ix, _ := strconv.Atoi(row.SelectAttrValue("IX", "0"))
+		t := TabStop{Row: ix}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "Position":
+				t.Position = toFloat(val)
+			case "Alignment":
+				t.Alignment, _ = strconv.Atoi(val)
+			case "Leader":
+				t.Leader, _ = strconv.Atoi(val)
+			}
+		}
+		result = append(result, t)
+	}
+	return result
+}
+
+// AddTabStop adds a tab stop to the shape.
+// position is in inches, alignment: 0=left, 1=center, 2=right, 3=decimal.
+func (s *Shape) AddTabStop(position float64, alignment int) int {
+	section := s.xml.FindElement("Section[@N='Tabs']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "Tabs")
+	}
+
+	maxIX := -1
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "")); err == nil && ix > maxIX {
+			maxIX = ix
+		}
+	}
+	ix := maxIX + 1
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", strconv.Itoa(ix))
+	addCellXML(row, "Position", fmtFloat(position), "")
+	addCellXML(row, "Alignment", strconv.Itoa(alignment), "")
+	return ix
+}
+
 // SetComment sets the Comment cell on the shape (visible as tooltip in Visio).
 func (s *Shape) SetComment(text string) {
 	s.SetCellValue("Comment", text)

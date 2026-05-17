@@ -539,3 +539,74 @@ func TestDetectSVGBrandColor(t *testing.T) {
 		t.Errorf("detectSVGBrandColor = %q, want #0078AA", got)
 	}
 }
+
+func TestSVGRenderNewGeometryRowTypes(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	// Use the first shape on the page
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes on page")
+	}
+	shape := shapes[0]
+
+	// Add various geometry row types to test SVG rendering
+	geom := shape.AddGeometry()
+	geom.AddRelMoveTo(0, 0)
+	geom.AddRelCubBezTo(1, 1, 0.25, 0.5, 0.75, 0.5)
+	geom.AddRelQuadBezTo(0.5, 0, 0.25, 0.5)
+	geom.AddRelEllipticalArcTo(0, 0.5, 0.5, 0.25, 1.5, 0)
+	geom.AddPolylineTo(1, 1, "POLYLINE(0,0,0.5,0.5,1,0)")
+	geom.AddInfiniteLine(0, 0, 1, 1)
+
+	// Render to SVG
+	result, err := ShapeToSVG(shape, WithSize(100, 100))
+	if err != nil {
+		t.Fatalf("ShapeToSVG: %v", err)
+	}
+
+	svg := string(result.SVG)
+	// Check that some path commands were generated
+	if !strings.Contains(svg, "<path") {
+		t.Error("expected SVG to contain path elements")
+	}
+	t.Logf("SVG rendered successfully, length=%d bytes", len(result.SVG))
+}
+
+func TestParsePolylinePoints(t *testing.T) {
+	// Test proportional coordinates (xType=0, yType=0)
+	pts := parsePolylinePoints("POLYLINE(0,0,0.25,0.25,0.75,0.75)", 2.0, 2.0, 1.0, 1.0)
+	if len(pts) != 2 {
+		t.Fatalf("expected 2 points, got %d", len(pts))
+	}
+	// 0.25 * 2.0 + 1.0 = 1.5
+	if pts[0].x != 1.5 || pts[0].y != 1.5 {
+		t.Errorf("pt[0] = (%v, %v), want (1.5, 1.5)", pts[0].x, pts[0].y)
+	}
+	// 0.75 * 2.0 + 1.0 = 2.5
+	if pts[1].x != 2.5 || pts[1].y != 2.5 {
+		t.Errorf("pt[1] = (%v, %v), want (2.5, 2.5)", pts[1].x, pts[1].y)
+	}
+
+	// Test absolute coordinates (xType=1, yType=1)
+	pts2 := parsePolylinePoints("POLYLINE(1, 1, 3.0, 4.0)", 2.0, 2.0, 0.5, 0.5)
+	if len(pts2) != 1 {
+		t.Fatalf("expected 1 point, got %d", len(pts2))
+	}
+	// 3.0 + 0.5 = 3.5
+	if pts2[0].x != 3.5 || pts2[0].y != 4.5 {
+		t.Errorf("pt2[0] = (%v, %v), want (3.5, 4.5)", pts2[0].x, pts2[0].y)
+	}
+
+	// Test invalid formulas
+	if parsePolylinePoints("", 1, 1, 0, 0) != nil {
+		t.Error("expected nil for empty formula")
+	}
+	if parsePolylinePoints("POLYLINE(0,0)", 1, 1, 0, 0) != nil {
+		t.Error("expected nil for formula with only type params")
+	}
+}

@@ -4082,3 +4082,1878 @@ func TestNetworkTopologyRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// --- Coverage Gap Tests ---
+
+func TestCellFormula(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+	shapes := page.ChildShapes()
+	if len(shapes) == 0 {
+		t.Skip("no shapes")
+	}
+
+	// Test CellFormula on shape with local cell
+	s := shapes[0]
+	s.SetCellValue(CellWidth, "2.5")
+
+	// CellFormula should return empty for cells set via value
+	formula := s.CellFormula(CellWidth)
+	t.Logf("CellFormula(Width) = %q", formula)
+
+	// Test CellFormula for non-existent cell
+	formula = s.CellFormula("NonExistentCell")
+	if formula != "" {
+		t.Errorf("CellFormula(NonExistentCell) = %q, want empty", formula)
+	}
+
+	// Test CellFormula inheritance from master shape
+	if s.MasterPageID != "" {
+		ms := s.MasterShape()
+		if ms != nil {
+			for name := range ms.Cells {
+				inherited := s.CellFormula(name)
+				t.Logf("Inherited formula %s = %q", name, inherited)
+				break
+			}
+		}
+	}
+}
+
+func TestCalcValueAllFormulas(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Create a connector shape to test formulas
+	conn, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	tests := []struct {
+		formula string
+		wantOK  bool
+	}{
+		{"Width*1", true},
+		{"Width*0", true},
+		{"(BeginX+EndX)/2", true},
+		{"(BeginY+EndY)/2", true},
+		{"GUARD((BeginX+EndX)/2)", true},
+		{"GUARD((BeginY+EndY)/2)", true},
+		{"Width*0.5", true},
+		{"Height*0.5", true},
+		{"GUARD(Width*0.5)", true},
+		{"GUARD(Height*0.5)", true},
+		{"SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)", true},
+		{"ATAN2(EndY-BeginY,EndX-BeginX)", true},
+		{"GUARD(EndX-BeginX)", true},
+		{"GUARD(EndY-BeginY)", true},
+		{"UnknownFormula", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.formula, func(t *testing.T) {
+			val, ok := CalcValue(conn, tt.formula)
+			if ok != tt.wantOK {
+				t.Errorf("CalcValue(%q) ok = %v, want %v", tt.formula, ok, tt.wantOK)
+			}
+			if ok {
+				t.Logf("CalcValue(%q) = %v", tt.formula, val)
+			}
+		})
+	}
+}
+
+func TestGeometryRowSetXYCreation(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+
+	// Add geometry
+	geom := s.AddGeometry()
+	geom.AddMoveTo(0, 0)
+	geom.AddLineTo(1, 1)
+
+	// Get a row from the map
+	if len(geom.Rows) == 0 {
+		t.Skip("no geometry rows")
+	}
+	var row *GeometryRow
+	for _, r := range geom.Rows {
+		row = r
+		break
+	}
+
+	// Clear the X/Y cells to test creation path
+	delete(row.Cells, "X")
+	delete(row.Cells, "Y")
+
+	// SetX/SetY should create cells
+	row.SetX(1.5)
+	row.SetY(2.5)
+
+	if row.Cells["X"] == nil {
+		t.Error("SetX did not create X cell")
+	}
+	if row.Cells["Y"] == nil {
+		t.Error("SetY did not create Y cell")
+	}
+
+	xVal := row.X()
+	yVal := row.Y()
+	if math.Abs(xVal-1.5) > 0.001 {
+		t.Errorf("X = %v, want 1.5", xVal)
+	}
+	if math.Abs(yVal-2.5) > 0.001 {
+		t.Errorf("Y = %v, want 2.5", yVal)
+	}
+}
+
+func TestShapeRemove(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	initialCount := len(page.ChildShapes())
+
+	// Remove a shape
+	toRemove := shapes[0]
+	toRemove.Remove()
+
+	// Verify shape count decreased
+	newCount := len(page.ChildShapes())
+	if newCount != initialCount-1 {
+		t.Errorf("shape count after Remove = %d, want %d", newCount, initialCount-1)
+	}
+
+	// Verify shape is no longer findable
+	found := page.FindShapeByText(toRemove.Text())
+	if found != nil {
+		t.Error("removed shape still findable")
+	}
+}
+
+func TestDataPropertyEdgeCases(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+
+	// Add a property (name, label, value)
+	s.AddDataProperty("TestProp", "TestProp", "Value1")
+
+	props := s.DataProperties()
+	var prop *DataProperty
+	for _, p := range props {
+		if p.Label == "TestProp" {
+			prop = p
+			break
+		}
+	}
+	if prop == nil {
+		t.Fatal("TestProp not found")
+	}
+
+	// Test Value()
+	if prop.Value() != "Value1" {
+		t.Errorf("Value = %q, want 'Value1'", prop.Value())
+	}
+
+	// Test SetValue
+	prop.SetValue("Value2")
+	if prop.Value() != "Value2" {
+		t.Errorf("Value after SetValue = %q, want 'Value2'", prop.Value())
+	}
+
+	// Test GetAttribute
+	labelAttr := prop.GetAttribute("Label", "V")
+	if labelAttr != "TestProp" {
+		t.Errorf("GetAttribute(Label, V) = %q, want 'TestProp'", labelAttr)
+	}
+
+	// Test GetAttribute for non-existent cell
+	missing := prop.GetAttribute("NonExistent", "V")
+	if missing != "" {
+		t.Errorf("GetAttribute(NonExistent, V) = %q, want empty", missing)
+	}
+
+	// Test SetAttribute
+	ok := prop.SetAttribute("Value", "U", "STR")
+	if !ok {
+		t.Error("SetAttribute returned false")
+	}
+
+	// Test SetAttribute for non-existent cell
+	ok = prop.SetAttribute("NonExistent", "V", "test")
+	if ok {
+		t.Error("SetAttribute(NonExistent) should return false")
+	}
+
+	// Test RemoveAttribute
+	ok = prop.RemoveAttribute("Value", "U")
+	if !ok {
+		t.Error("RemoveAttribute returned false")
+	}
+
+	// Test RemoveAttribute for non-existent attribute
+	ok = prop.RemoveAttribute("Value", "NonExistent")
+	if ok {
+		t.Error("RemoveAttribute(NonExistent) should return false")
+	}
+
+	// Test RemoveAttribute for non-existent cell
+	ok = prop.RemoveAttribute("NonExistent", "V")
+	if ok {
+		t.Error("RemoveAttribute on non-existent cell should return false")
+	}
+}
+
+func TestPageDimensionEdgeCases(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+
+	// Test Width/Height
+	w := page.Width()
+	h := page.Height()
+	t.Logf("Page dimensions: %.2f x %.2f", w, h)
+
+	if w <= 0 {
+		t.Errorf("Width = %v, want > 0", w)
+	}
+	if h <= 0 {
+		t.Errorf("Height = %v, want > 0", h)
+	}
+
+	// Test SetWidth/SetHeight
+	page.SetWidth(11.0)
+	page.SetHeight(8.5)
+
+	if math.Abs(page.Width()-11.0) > 0.001 {
+		t.Errorf("Width after SetWidth = %v, want 11.0", page.Width())
+	}
+	if math.Abs(page.Height()-8.5) > 0.001 {
+		t.Errorf("Height after SetHeight = %v, want 8.5", page.Height())
+	}
+
+	// Test IndexNum
+	idx := page.IndexNum()
+	t.Logf("IndexNum = %d", idx)
+}
+
+func TestMasterShapeInheritance(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+	shapes := page.ChildShapes()
+
+	for _, s := range shapes {
+		if s.MasterPageID == "" {
+			continue
+		}
+
+		// Test MasterShape
+		ms := s.MasterShape()
+		if ms != nil {
+			t.Logf("Shape %s has MasterShape with %d cells", s.ID, len(ms.Cells))
+
+			// Test MasterPage
+			mp := s.MasterPage()
+			if mp != nil {
+				t.Logf("Shape %s has MasterPage %s", s.ID, mp.Name())
+			}
+		}
+		break
+	}
+
+	// Test shape without master
+	for _, s := range shapes {
+		if s.MasterPageID == "" {
+			ms := s.MasterShape()
+			if ms != nil {
+				t.Error("shape without MasterPageID should have nil MasterShape")
+			}
+			mp := s.MasterPage()
+			if mp != nil {
+				t.Error("shape without MasterPageID should have nil MasterPage")
+			}
+			break
+		}
+	}
+}
+
+func TestFindShapesEdgeCases(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+
+	// Test FindShapeByPropertyLabel with non-existent label
+	found := page.FindShapeByPropertyLabel("NonExistentLabel")
+	if found != nil {
+		t.Error("FindShapeByPropertyLabel should return nil for non-existent label")
+	}
+
+	// Test FindShapesByRegex with no matches
+	matches, err := page.FindShapesByRegex("^ZZZ_IMPOSSIBLE_PATTERN$")
+	if err != nil {
+		t.Fatalf("FindShapesByRegex: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("FindShapesByRegex should return empty for no matches, got %d", len(matches))
+	}
+
+	// Test FindShapeByID with non-existent ID
+	byID := page.FindShapeByID("99999")
+	if byID != nil {
+		t.Error("FindShapeByID should return nil for non-existent ID")
+	}
+}
+
+func TestGeometryStartPos(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddMoveTo(1.0, 2.0)
+	geom.AddLineTo(3.0, 4.0)
+
+	// Test StartPos
+	x, y := geom.StartPos()
+	if math.Abs(x-1.0) > 0.001 || math.Abs(y-2.0) > 0.001 {
+		t.Errorf("StartPos = (%v, %v), want (1.0, 2.0)", x, y)
+	}
+
+	// Test StartPos on empty geometry
+	emptyGeom := s.AddGeometry()
+	emptyX, emptyY := emptyGeom.StartPos()
+	if emptyX != 0 || emptyY != 0 {
+		t.Errorf("empty StartPos = (%v, %v), want (0, 0)", emptyX, emptyY)
+	}
+}
+
+func TestConnectsMethods(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Create connection
+	_, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	connects := page.Connects()
+	if len(connects) == 0 {
+		t.Skip("no connects")
+	}
+
+	// Test Connect methods
+	c := connects[0]
+	t.Logf("Connect: ShapeID=%s, ConnectorShapeID=%s", c.ShapeID(), c.ConnectorShapeID())
+
+	shape := c.Shape()
+	if shape == nil {
+		t.Error("Connect.Shape() is nil")
+	}
+
+	conn := c.ConnectorShape()
+	if conn == nil {
+		t.Error("Connect.ConnectorShape() is nil")
+	}
+
+	// Test GetConnectorsBetween (needs shapeAID, shapeAText, shapeBID, shapeBText)
+	connectors, err := page.GetConnectorsBetween(shapes[0].ID, shapes[0].Text(), shapes[1].ID, shapes[1].Text())
+	if err != nil {
+		t.Fatalf("GetConnectorsBetween: %v", err)
+	}
+	if len(connectors) == 0 {
+		t.Error("GetConnectorsBetween returned no connectors")
+	}
+
+	// Test GetConnectorsBetween with no connection
+	connectors, _ = page.GetConnectorsBetween(shapes[0].ID, shapes[0].Text(), shapes[2].ID, shapes[2].Text())
+	t.Logf("GetConnectorsBetween(0, 2) = %d connectors", len(connectors))
+}
+
+func TestTextColor(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	s.SetTextColor("#FF0000")
+
+	color := s.TextColor()
+	if color != "#FF0000" {
+		t.Errorf("TextColor = %q, want '#FF0000'", color)
+	}
+
+	// Test TextColor on shape without color set
+	s2 := shapes[1]
+	color2 := s2.TextColor()
+	t.Logf("Default TextColor = %q", color2)
+}
+
+func TestShapeMove(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+
+	// Get original position
+	origX := s.X()
+	origY := s.Y()
+
+	// Move by delta
+	s.Move(1.0, -0.5)
+
+	newX := s.X()
+	newY := s.Y()
+
+	if math.Abs(newX-(origX+1.0)) > 0.001 {
+		t.Errorf("X after Move = %v, want %v", newX, origX+1.0)
+	}
+	if math.Abs(newY-(origY-0.5)) > 0.001 {
+		t.Errorf("Y after Move = %v, want %v", newY, origY-0.5)
+	}
+}
+
+func TestDiffEdgeCases(t *testing.T) {
+	// Compare two existing test files
+	diff, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatalf("NewVisioFileDiff: %v", err)
+	}
+
+	// Test CompareMembers
+	same := diff.CompareMembers()
+	t.Logf("CompareMembers: same = %v", same)
+
+	// Test RemovedMembers
+	removedOnly := diff.RemovedMembers()
+	t.Logf("RemovedMembers: %d", len(removedOnly))
+}
+
+func TestSaveVsdxToPath(t *testing.T) {
+	vis, _, _ := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Save to temp file
+	tmpFile := filepath.Join(os.TempDir(), "test_save_coverage.vsdx")
+	defer os.Remove(tmpFile)
+
+	err := vis.SaveVsdx(tmpFile)
+	if err != nil {
+		t.Fatalf("SaveVsdx: %v", err)
+	}
+
+	// Verify file exists
+	info, err := os.Stat(tmpFile)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("saved file is empty")
+	}
+
+	// Reopen to verify
+	vis2, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer vis2.Close() //nolint:errcheck
+
+	if len(vis2.Pages) == 0 {
+		t.Error("reopened file has no pages")
+	}
+}
+
+func TestMediaRelsXML(t *testing.T) {
+	// Test Media directly
+	media, err := NewMedia()
+	if err != nil {
+		t.Fatalf("NewMedia: %v", err)
+	}
+	defer media.Close() //nolint:errcheck
+
+	// Test template shapes
+	if media.StraightConnector() == nil {
+		t.Error("StraightConnector returned nil")
+	}
+	if media.Rectangle() == nil {
+		t.Error("Rectangle returned nil")
+	}
+	if media.Circle() == nil {
+		t.Error("Circle returned nil")
+	}
+
+	// Test RelsXML
+	rels := media.RelsXML()
+	t.Logf("RelsXML length: %d", len(rels))
+
+	// Test VisioFile access
+	vis := media.VisioFile()
+	if vis == nil {
+		t.Error("VisioFile returned nil")
+	}
+}
+
+func TestDataPropertyValueEdges(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+
+	// Add property with empty value
+	prop := s.AddDataProperty("EmptyProp", "EmptyLabel", "")
+	if prop == nil {
+		t.Fatal("AddDataProperty returned nil")
+	}
+
+	// Verify empty value
+	if prop.Value() != "" {
+		t.Errorf("Value = %q, want empty", prop.Value())
+	}
+
+	// Add property with actual value
+	prop2 := s.AddDataProperty("RealProp", "RealLabel", "RealValue")
+	if prop2.Value() != "RealValue" {
+		t.Errorf("Value = %q, want 'RealValue'", prop2.Value())
+	}
+
+	// Test SetValue
+	prop2.SetValue("UpdatedValue")
+	if prop2.Value() != "UpdatedValue" {
+		t.Errorf("Value after SetValue = %q, want 'UpdatedValue'", prop2.Value())
+	}
+}
+
+func TestGeometryCellXYNoFormula(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddMoveTo(1.5, 2.5)
+
+	// Get row and verify X/Y
+	for _, row := range geom.Rows {
+		x := row.X()
+		y := row.Y()
+		t.Logf("Row X=%v Y=%v", x, y)
+
+		// Test without cells (remove them)
+		delete(row.Cells, "X")
+		delete(row.Cells, "Y")
+
+		// X/Y should return 0 when cells don't exist
+		if row.X() != 0 {
+			t.Errorf("X without cell = %v, want 0", row.X())
+		}
+		if row.Y() != 0 {
+			t.Errorf("Y without cell = %v, want 0", row.Y())
+		}
+		break
+	}
+}
+
+func TestShapeTextInheritance(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+	shapes := page.ChildShapes()
+
+	for _, s := range shapes {
+		text := s.Text()
+		if text != "" {
+			t.Logf("Shape %s has text: %q", s.ID, text)
+		}
+
+		// Test master shape text inheritance
+		if s.MasterPageID != "" {
+			ms := s.MasterShape()
+			if ms != nil {
+				masterText := ms.Text()
+				t.Logf("Master shape text: %q", masterText)
+			}
+		}
+	}
+}
+
+func TestPageNilXML(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+
+	// Test ChildShapes
+	children := page.ChildShapes()
+	if len(children) == 0 {
+		t.Error("expected child shapes")
+	}
+
+	// Test shapes()
+	allShapes := page.ChildShapes()
+	t.Logf("Page has %d shapes", len(allShapes))
+
+	// Test Connects with actual connections
+	_, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	connects := page.Connects()
+	t.Logf("Page has %d connects", len(connects))
+}
+
+func TestCellFormulaInheritance(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+	shapes := page.ChildShapes()
+
+	for _, s := range shapes {
+		if s.MasterPageID == "" {
+			continue
+		}
+
+		ms := s.MasterShape()
+		if ms == nil {
+			continue
+		}
+
+		// Test CellFormula inheritance - look for a cell with formula in master
+		for name, cell := range ms.Cells {
+			if cell.Formula() != "" {
+				// Shape should inherit formula from master
+				inheritedFormula := s.CellFormula(name)
+				t.Logf("Inherited formula for %s: %q (master: %q)", name, inheritedFormula, cell.Formula())
+				return
+			}
+		}
+	}
+}
+
+func TestToFloatEdgeCases(t *testing.T) {
+	tests := []struct {
+		input string
+		want  float64
+	}{
+		{"1.5", 1.5},
+		{"0", 0},
+		{"", 0},
+		{"invalid", 0},
+		{"-3.14", -3.14},
+		{"1e-5", 1e-5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := toFloat(tt.input)
+			if math.Abs(got-tt.want) > 0.0001 {
+				t.Errorf("toFloat(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMasterShapeNilCases(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// buildNetworkTopology creates shapes without masters
+	for _, s := range shapes {
+		if s.MasterPageID != "" {
+			continue
+		}
+
+		// MasterShape and MasterPage should return nil
+		ms := s.MasterShape()
+		mp := s.MasterPage()
+
+		if ms != nil {
+			t.Error("MasterShape should be nil for shape without master")
+		}
+		if mp != nil {
+			t.Error("MasterPage should be nil for shape without master")
+		}
+		break
+	}
+}
+
+func TestUserCellValueNotFound(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+
+	// Get non-existent user cell
+	val := s.UserCellValue("NonExistentCell")
+	if val != "" {
+		t.Errorf("UserCellValue(NonExistent) = %q, want empty", val)
+	}
+
+	// Add a user cell and verify
+	s.AddUserCell("TestCell", "TestValue")
+	val = s.UserCellValue("TestCell")
+	if val != "TestValue" {
+		t.Errorf("UserCellValue(TestCell) = %q, want 'TestValue'", val)
+	}
+}
+
+func TestMasterShapeEdgeCases(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+	shapes := page.ChildShapes()
+
+	// Find a shape with a master that has MasterShapeID
+	for _, s := range shapes {
+		if s.MasterPageID == "" {
+			continue
+		}
+
+		t.Logf("Shape %s: MasterPageID=%s MasterShapeID=%s", s.ID, s.MasterPageID, s.MasterShapeID)
+
+		// Test MasterShape with valid master
+		ms := s.MasterShape()
+		if ms != nil {
+			t.Logf("Found master shape with %d cells", len(ms.Cells))
+		}
+
+		// Test MasterPage
+		mp := s.MasterPage()
+		if mp != nil {
+			t.Logf("Found master page: %s", mp.Name())
+		}
+		break
+	}
+
+	// Test with non-existent MasterPageID
+	if len(shapes) > 0 {
+		s := shapes[0]
+		origMasterPageID := s.MasterPageID
+		s.MasterPageID = "99999" // Non-existent
+
+		ms := s.MasterShape()
+		if ms != nil {
+			t.Error("MasterShape should be nil for non-existent MasterPageID")
+		}
+
+		s.MasterPageID = origMasterPageID
+	}
+}
+
+func TestMoveWithBeginXY(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Create a connector which has BeginX/BeginY
+	conn, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	// Get original positions
+	origBeginX := conn.BeginX()
+	origBeginY := conn.BeginY()
+	origX := conn.X()
+	origY := conn.Y()
+
+	// Move the connector
+	conn.Move(1.0, 2.0)
+
+	// Verify BeginX/BeginY moved
+	if !conn.HasBeginX() {
+		t.Error("connector should have BeginX")
+	}
+
+	newBeginX := conn.BeginX()
+	newBeginY := conn.BeginY()
+
+	if math.Abs(newBeginX-(origBeginX+1.0)) > 0.001 {
+		t.Errorf("BeginX after Move = %v, want %v", newBeginX, origBeginX+1.0)
+	}
+	if math.Abs(newBeginY-(origBeginY+2.0)) > 0.001 {
+		t.Errorf("BeginY after Move = %v, want %v", newBeginY, origBeginY+2.0)
+	}
+
+	// Verify X/Y also moved
+	newX := conn.X()
+	newY := conn.Y()
+	if math.Abs(newX-(origX+1.0)) > 0.001 {
+		t.Errorf("X after Move = %v, want %v", newX, origX+1.0)
+	}
+	if math.Abs(newY-(origY+2.0)) > 0.001 {
+		t.Errorf("Y after Move = %v, want %v", newY, origY+2.0)
+	}
+}
+
+func TestConnectedShapes(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Create connections
+	_, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+	_, err = vis.ConnectShapes(page, shapes[0], shapes[2])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	// Test ConnectedShapes
+	connected := shapes[0].ConnectedShapes()
+	t.Logf("Shape 0 connected to %d shapes", len(connected))
+
+	if len(connected) < 2 {
+		t.Errorf("expected at least 2 connected shapes, got %d", len(connected))
+	}
+}
+
+func TestUniversalName(t *testing.T) {
+	vis, err := Open(testFile("test1.vsdx"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer vis.Close() //nolint:errcheck
+
+	page := vis.GetPage(0)
+	shapes := page.ChildShapes()
+
+	for _, s := range shapes {
+		un := s.UniversalName()
+		if un != "" {
+			t.Logf("Shape %s has UniversalName: %q", s.ID, un)
+		}
+	}
+
+	// Test on shape without master
+	vis2, _, shapes2 := buildNetworkTopology(t)
+	defer vis2.Close() //nolint:errcheck
+
+	un := shapes2[0].UniversalName()
+	if un != "" {
+		t.Errorf("UniversalName for shape without master = %q, want empty", un)
+	}
+}
+
+func TestDiffCompareMoreCases(t *testing.T) {
+	// Compare two different files
+	diff, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test2.vsdx"))
+	if err != nil {
+		t.Fatalf("NewVisioFileDiff: %v", err)
+	}
+
+	same := diff.CompareMembers()
+	t.Logf("CompareMembers = %v", same)
+
+	removed := diff.RemovedMembers()
+	t.Logf("RemovedMembers = %d", len(removed))
+
+	// Test with files that have more differences
+	diff2, err := NewVisioFileDiff(testFile("test1.vsdx"), testFile("test3_house.vsdx"))
+	if err != nil {
+		t.Fatalf("NewVisioFileDiff: %v", err)
+	}
+
+	same2 := diff2.CompareMembers()
+	t.Logf("CompareMembers(1,3_house) = %v", same2)
+}
+
+func TestGetMaxID(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Add some child shapes via grouping
+	group := page.GroupShapes([]*Shape{shapes[0], shapes[1]}, 0.1)
+	if group == nil {
+		t.Fatal("GroupShapes returned nil")
+	}
+
+	maxID := group.GetMaxID()
+	t.Logf("GetMaxID = %d", maxID)
+
+	if maxID < 1 {
+		t.Errorf("GetMaxID = %d, want >= 1", maxID)
+	}
+}
+
+func TestAddConnectEdgeCases(t *testing.T) {
+	vis, page, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	// Create a connection
+	conn, err := vis.ConnectShapes(page, shapes[0], shapes[1])
+	if err != nil {
+		t.Fatalf("ConnectShapes: %v", err)
+	}
+
+	// Verify connects were added
+	connects := page.Connects()
+	initialCount := len(connects)
+	t.Logf("Initial connects: %d", initialCount)
+
+	// AddConnect is called internally by ConnectShapes
+	// Verify the connect has correct shape references
+	for _, c := range connects {
+		if c.ConnectorShape() != nil && c.ConnectorShape().ID == conn.ID {
+			t.Logf("Found connect for connector %s -> shape %s", c.ConnectorShapeID(), c.ShapeID())
+		}
+	}
+}
+
+// --- Geometry Row Type Tests ---
+
+func TestGeometryRelCubBezTo(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddRelMoveTo(0, 0)
+	geom.AddRelCubBezTo(1, 1, 0.25, 0.5, 0.75, 0.5) // Cubic bezier curve
+
+	if len(geom.Rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(geom.Rows))
+	}
+
+	// Verify row type
+	for _, row := range geom.Rows {
+		if row.RowType() == "RelCubBezTo" {
+			if row.Cells["A"] == nil || row.Cells["B"] == nil {
+				t.Error("RelCubBezTo missing control point cells")
+			}
+			t.Logf("RelCubBezTo: X=%v Y=%v A=%v B=%v", row.X(), row.Y(),
+				row.Cells["A"].Value(), row.Cells["B"].Value())
+		}
+	}
+}
+
+func TestGeometryRelQuadBezTo(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddRelMoveTo(0, 0)
+	geom.AddRelQuadBezTo(1, 1, 0.5, 0.75) // Quadratic bezier curve
+
+	if len(geom.Rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(geom.Rows))
+	}
+
+	// Verify row type
+	for _, row := range geom.Rows {
+		if row.RowType() == "RelQuadBezTo" {
+			if row.Cells["A"] == nil || row.Cells["B"] == nil {
+				t.Error("RelQuadBezTo missing control point cells")
+			}
+			t.Logf("RelQuadBezTo: X=%v Y=%v A=%v B=%v", row.X(), row.Y(),
+				row.Cells["A"].Value(), row.Cells["B"].Value())
+		}
+	}
+}
+
+func TestGeometryRelEllipticalArcTo(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddRelMoveTo(0, 0.5)
+	geom.AddRelEllipticalArcTo(1, 0.5, 0.5, 0, 1.5, 0) // Elliptical arc
+
+	if len(geom.Rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(geom.Rows))
+	}
+
+	for _, row := range geom.Rows {
+		if row.RowType() == "RelEllipticalArcTo" {
+			t.Logf("RelEllipticalArcTo: X=%v Y=%v", row.X(), row.Y())
+		}
+	}
+}
+
+func TestGeometryPolylineTo(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddMoveTo(0, 0)
+	geom.AddPolylineTo(1, 1, "POLYLINE(0,0,0.5,0.5,1,0)") // Polyline formula
+
+	if len(geom.Rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(geom.Rows))
+	}
+
+	for _, row := range geom.Rows {
+		if row.RowType() == "PolylineTo" {
+			if row.Cells["A"] == nil {
+				t.Error("PolylineTo missing A cell")
+			} else {
+				t.Logf("PolylineTo formula: %s", row.Cells["A"].Value())
+			}
+		}
+	}
+}
+
+func TestGeometryNURBSTo(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddMoveTo(0, 0)
+	geom.AddNURBSTo(1, 1, 0, 1, 0, 1, "NURBS(0,0,1,1,0,1)")
+
+	if len(geom.Rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(geom.Rows))
+	}
+
+	for _, row := range geom.Rows {
+		if row.RowType() == "NURBSTo" {
+			if row.Cells["E"] == nil {
+				t.Error("NURBSTo missing E cell")
+			} else {
+				t.Logf("NURBSTo formula: %s", row.Cells["E"].Value())
+			}
+		}
+	}
+}
+
+func TestGeometrySpline(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddMoveTo(0, 0)
+	geom.AddSplineStart(0.5, 0.5, 1, 0, 2, 3) // degree 3 spline
+	geom.AddSplineKnot(1, 1, 1.5)
+
+	if len(geom.Rows) != 3 {
+		t.Errorf("expected 3 rows, got %d", len(geom.Rows))
+	}
+
+	foundStart := false
+	foundKnot := false
+	for _, row := range geom.Rows {
+		if row.RowType() == "SplineStart" {
+			foundStart = true
+			t.Logf("SplineStart: X=%v Y=%v degree=%s", row.X(), row.Y(), row.Cells["D"].Value())
+		}
+		if row.RowType() == "SplineKnot" {
+			foundKnot = true
+			t.Logf("SplineKnot: X=%v Y=%v knot=%s", row.X(), row.Y(), row.Cells["A"].Value())
+		}
+	}
+
+	if !foundStart {
+		t.Error("SplineStart row not found")
+	}
+	if !foundKnot {
+		t.Error("SplineKnot row not found")
+	}
+}
+
+func TestGeometryInfiniteLine(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddInfiniteLine(0, 0, 1, 1) // Line through (0,0) and (1,1)
+
+	if len(geom.Rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(geom.Rows))
+	}
+
+	for _, row := range geom.Rows {
+		if row.RowType() == "InfiniteLine" {
+			t.Logf("InfiniteLine: point1=(%v,%v) point2=(%s,%s)",
+				row.X(), row.Y(), row.Cells["A"].Value(), row.Cells["B"].Value())
+		}
+	}
+}
+
+func TestGeometryBezierRoundTrip(t *testing.T) {
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+	geom.AddRelMoveTo(0, 0)
+	geom.AddRelCubBezTo(1, 0, 0.33, 0.5, 0.66, 0.5)
+	geom.AddRelQuadBezTo(1, 1, 0.5, 1.5)
+
+	// Save and reopen
+	data, err := vis.SaveVsdxBytes()
+	if err != nil {
+		t.Fatalf("SaveVsdxBytes: %v", err)
+	}
+
+	vis2, err := OpenBytes(data)
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	defer vis2.Close() //nolint:errcheck
+
+	page2 := vis2.GetPage(0)
+	shapes2 := page2.ChildShapes()
+	if len(shapes2) == 0 {
+		t.Fatal("no shapes after reopen")
+	}
+
+	// Find the shape with geometry
+	for _, s2 := range shapes2 {
+		if s2.Geometry != nil && len(s2.Geometry.Rows) >= 3 {
+			t.Logf("Found shape with %d geometry rows after round-trip", len(s2.Geometry.Rows))
+			for _, row := range s2.Geometry.Rows {
+				t.Logf("  Row type: %s", row.RowType())
+			}
+			return
+		}
+	}
+}
+
+func TestScratchSection(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Add scratch cells
+	ix := s.AddScratchCell("1.5", "2.5", "test", "", "", "")
+	if ix != 0 {
+		t.Errorf("expected ix=0, got %d", ix)
+	}
+
+	// Add another
+	ix2 := s.AddScratchCell("", "", "", "B value", "C value", "D value")
+	if ix2 != 1 {
+		t.Errorf("expected ix=1, got %d", ix2)
+	}
+
+	// Read back
+	cells := s.ScratchCells()
+	if len(cells) != 2 {
+		t.Fatalf("expected 2 scratch cells, got %d", len(cells))
+	}
+	if cells[0].X != "1.5" {
+		t.Errorf("expected X=1.5, got %s", cells[0].X)
+	}
+	if cells[0].A != "test" {
+		t.Errorf("expected A=test, got %s", cells[0].A)
+	}
+	if cells[1].B != "B value" {
+		t.Errorf("expected B='B value', got %s", cells[1].B)
+	}
+	t.Logf("Scratch cells: %+v", cells)
+}
+
+func TestActionsSection(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Add actions
+	s.AddAction("MyAction1", "Click Me", "RUNADDON(\"myapp\")")
+	s.AddAction("MyAction2", "Open URL", "OPENURL(\"http://example.com\")")
+
+	// Read back
+	actions := s.Actions()
+	if len(actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(actions))
+	}
+	if actions[0].Name != "MyAction1" {
+		t.Errorf("expected name=MyAction1, got %s", actions[0].Name)
+	}
+	if actions[0].Menu != "Click Me" {
+		t.Errorf("expected menu='Click Me', got %s", actions[0].Menu)
+	}
+	if actions[1].Menu != "Open URL" {
+		t.Errorf("expected menu='Open URL', got %s", actions[1].Menu)
+	}
+	t.Logf("Actions: %+v", actions)
+}
+
+func TestFieldSection(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Add fields: type 0=string, 2=numeric, 5=date/time
+	ix := s.AddField(0, "Custom Text", "")
+	if ix != 0 {
+		t.Errorf("expected ix=0, got %d", ix)
+	}
+
+	ix2 := s.AddField(5, "", "{{MM/DD/YYYY}}")
+	if ix2 != 1 {
+		t.Errorf("expected ix=1, got %d", ix2)
+	}
+
+	// Read back
+	fields := s.Fields()
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(fields))
+	}
+	if fields[0].Type != 0 {
+		t.Errorf("expected type=0, got %d", fields[0].Type)
+	}
+	if fields[0].Value != "Custom Text" {
+		t.Errorf("expected value='Custom Text', got %s", fields[0].Value)
+	}
+	if fields[1].Type != 5 {
+		t.Errorf("expected type=5, got %d", fields[1].Type)
+	}
+	t.Logf("Fields: %+v", fields)
+}
+
+func TestControlSection(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Add controls
+	s.AddControl("Handle1", 0.5, 0.5, "Drag me")
+	s.AddControl("Handle2", 1.0, 0.0, "")
+
+	// Read back
+	controls := s.Controls()
+	if len(controls) < 2 {
+		t.Fatalf("expected at least 2 controls, got %d", len(controls))
+	}
+
+	found := false
+	for _, c := range controls {
+		if c.Name == "Handle1" {
+			found = true
+			if c.X != 0.5 {
+				t.Errorf("expected X=0.5, got %f", c.X)
+			}
+			if c.Tip != "Drag me" {
+				t.Errorf("expected tip='Drag me', got %s", c.Tip)
+			}
+		}
+	}
+	if !found {
+		t.Error("Handle1 control not found")
+	}
+	t.Logf("Controls: %+v", controls)
+}
+
+func TestTabsSection(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Add tab stops: alignment 0=left, 1=center, 2=right
+	ix := s.AddTabStop(1.0, 0)
+	if ix != 0 {
+		t.Errorf("expected ix=0, got %d", ix)
+	}
+
+	ix2 := s.AddTabStop(2.5, 2)
+	if ix2 != 1 {
+		t.Errorf("expected ix=1, got %d", ix2)
+	}
+
+	// Read back
+	tabs := s.TabStops()
+	if len(tabs) != 2 {
+		t.Fatalf("expected 2 tab stops, got %d", len(tabs))
+	}
+	if tabs[0].Position != 1.0 {
+		t.Errorf("expected position=1.0, got %f", tabs[0].Position)
+	}
+	if tabs[0].Alignment != 0 {
+		t.Errorf("expected alignment=0, got %d", tabs[0].Alignment)
+	}
+	if tabs[1].Position != 2.5 {
+		t.Errorf("expected position=2.5, got %f", tabs[1].Position)
+	}
+	if tabs[1].Alignment != 2 {
+		t.Errorf("expected alignment=2, got %d", tabs[1].Alignment)
+	}
+	t.Logf("Tab stops: %+v", tabs)
+}
+
+func TestFormulaEvaluator(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	eval := NewFormulaEvaluator(shape)
+
+	tests := []struct {
+		formula string
+		want    float64
+		wantOK  bool
+	}{
+		// Basic numbers
+		{"42", 42, true},
+		{"3.14", 3.14, true},
+		{"-5", -5, true},
+
+		// Basic arithmetic
+		{"2+3", 5, true},
+		{"10-4", 6, true},
+		{"3*4", 12, true},
+		{"15/3", 5, true},
+		{"2^3", 8, true},
+
+		// Operator precedence
+		{"2+3*4", 14, true},
+		{"(2+3)*4", 20, true},
+		{"10-2*3", 4, true},
+		{"2^2+1", 5, true},
+
+		// Math functions
+		{"ABS(-5)", 5, true},
+		{"ABS(5)", 5, true},
+		{"SQRT(16)", 4, true},
+		{"SQRT(2)", 1.4142135623730951, true},
+
+		// Trig functions
+		{"SIN(0)", 0, true},
+		{"COS(0)", 1, true},
+		{"TAN(0)", 0, true},
+
+		// Rounding
+		{"INT(3.7)", 3, true},
+		{"INT(-3.7)", -3, true},
+		{"FLOOR(3.7)", 3, true},
+		{"FLOOR(-3.7)", -4, true},
+		{"CEILING(3.2)", 4, true},
+		{"CEILING(-3.2)", -3, true},
+		{"ROUND(3.5)", 4, true},
+		{"TRUNC(3.9)", 3, true},
+
+		// Sign
+		{"SIGN(42)", 1, true},
+		{"SIGN(-42)", -1, true},
+		{"SIGN(0)", 0, true},
+
+		// Min/Max
+		{"MAX(3,7)", 7, true},
+		{"MIN(3,7)", 3, true},
+		{"MAX(-5,2)", 2, true},
+
+		// Conditional
+		{"IF(1,10,20)", 10, true},
+		{"IF(0,10,20)", 20, true},
+		{"IF(5>3,1,0)", 0, false}, // comparison not supported yet
+
+		// Nested functions
+		{"ABS(SQRT(16)-5)", 1, true},
+		{"MAX(ABS(-3),2)", 3, true},
+
+		// GUARD (should just return inner value)
+		{"GUARD(5)", 5, true},
+		{"GUARD(2+3)", 5, true},
+
+		// PI
+		{"PI()", 3.141592653589793, true},
+
+		// Conversions
+		{"DEG(3.141592653589793)", 180, true},
+
+		// Logical
+		{"NOT(0)", 1, true},
+		{"NOT(1)", 0, true},
+		{"AND(1,1)", 1, true},
+		{"AND(1,0)", 0, true},
+		{"OR(0,1)", 1, true},
+		{"OR(0,0)", 0, true},
+
+		// Exponential/Log
+		{"EXP(0)", 1, true},
+		{"LN(1)", 0, true},
+
+		// Power
+		{"POW(2,3)", 8, true},
+		{"POW(3,2)", 9, true},
+
+		// Modulo
+		{"MOD(7,3)", 1, true},
+		{"MOD(10,5)", 0, true},
+
+		// Complex expressions
+		{"SQRT((3)^2+(4)^2)", 5, true},
+		{"(1+2)*(3+4)", 21, true},
+		{"2*3+4*5", 26, true},
+
+		// Bitwise
+		{"BITAND(12,10)", 8, true},
+		{"BITOR(12,10)", 14, true},
+		{"BITXOR(12,10)", 6, true},
+	}
+
+	for _, tt := range tests {
+		got, ok := eval.Eval(tt.formula)
+		if ok != tt.wantOK {
+			t.Errorf("Eval(%q): got ok=%v, want ok=%v", tt.formula, ok, tt.wantOK)
+			continue
+		}
+		if ok && math.Abs(got-tt.want) > 0.0001 {
+			t.Errorf("Eval(%q) = %v, want %v", tt.formula, got, tt.want)
+		}
+	}
+}
+
+func TestFormulaEvaluatorCellRefs(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	eval := NewFormulaEvaluator(shape)
+
+	// Test cell references
+	w, wok := eval.Eval("Width")
+	h, hok := eval.Eval("Height")
+
+	if !wok || !hok {
+		t.Fatal("failed to evaluate Width/Height")
+	}
+
+	// Test expressions with cell refs
+	half, ok := eval.Eval("Width*0.5")
+	if !ok {
+		t.Fatal("failed to evaluate Width*0.5")
+	}
+	if math.Abs(half-w*0.5) > 0.0001 {
+		t.Errorf("Width*0.5 = %v, want %v", half, w*0.5)
+	}
+
+	// Test GUARD with cell ref
+	guarded, ok := eval.Eval("GUARD(Width*0.5)")
+	if !ok {
+		t.Fatal("failed to evaluate GUARD(Width*0.5)")
+	}
+	if math.Abs(guarded-w*0.5) > 0.0001 {
+		t.Errorf("GUARD(Width*0.5) = %v, want %v", guarded, w*0.5)
+	}
+
+	t.Logf("Shape dimensions: Width=%v, Height=%v", w, h)
+}
+
+func TestFormulaEvaluatorConnector(t *testing.T) {
+	// Test formulas commonly used for connectors
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Set BeginX/Y and EndX/Y for testing
+	shape.SetCellValue("BeginX", "1")
+	shape.SetCellValue("BeginY", "1")
+	shape.SetCellValue("EndX", "4")
+	shape.SetCellValue("EndY", "5")
+
+	eval := NewFormulaEvaluator(shape)
+
+	// Test midpoint formula
+	midX, ok := eval.Eval("(BeginX+EndX)/2")
+	if !ok {
+		t.Fatal("failed to evaluate midpoint X")
+	}
+	if math.Abs(midX-2.5) > 0.0001 {
+		t.Errorf("(BeginX+EndX)/2 = %v, want 2.5", midX)
+	}
+
+	midY, ok := eval.Eval("(BeginY+EndY)/2")
+	if !ok {
+		t.Fatal("failed to evaluate midpoint Y")
+	}
+	if math.Abs(midY-3) > 0.0001 {
+		t.Errorf("(BeginY+EndY)/2 = %v, want 3", midY)
+	}
+
+	// Test length formula: SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)
+	length, ok := eval.Eval("SQRT((EndX-BeginX)^2+(EndY-BeginY)^2)")
+	if !ok {
+		t.Fatal("failed to evaluate length formula")
+	}
+	expected := math.Sqrt(3*3 + 4*4) // sqrt(9+16) = sqrt(25) = 5
+	if math.Abs(length-expected) > 0.0001 {
+		t.Errorf("length = %v, want %v", length, expected)
+	}
+
+	t.Logf("Connector: midX=%v, midY=%v, length=%v", midX, midY, length)
+}
+
+func TestCalcValueBackwardsCompat(t *testing.T) {
+	// Test that CalcValue still works for backward compatibility
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test old formulas that were hardcoded
+	tests := []struct {
+		formula string
+	}{
+		{"Width*1"},
+		{"Width*0"},
+		{"Width*0.5"},
+		{"Height*0.5"},
+		{"GUARD(Width*0.5)"},
+		{"GUARD(Height*0.5)"},
+	}
+
+	for _, tt := range tests {
+		_, ok := CalcValue(shape, tt.formula)
+		if !ok {
+			t.Errorf("CalcValue(%q) failed", tt.formula)
+		}
+	}
+}
+
+func TestFormulaEdgeCases(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	eval := NewFormulaEvaluator(shape)
+
+	// Test edge cases - should fail
+	failCases := []string{
+		"",         // Empty formula
+		"1/0",      // Division by zero
+		"SQRT(-1)", // Invalid sqrt
+		"ASIN(2)",  // Invalid asin
+		"ACOS(2)",  // Invalid acos
+		"LN(0)",    // Invalid ln
+		"LN(-1)",   // Invalid ln
+	}
+
+	for _, formula := range failCases {
+		_, ok := eval.Eval(formula)
+		if ok {
+			t.Errorf("Eval(%q) should have failed", formula)
+		}
+	}
+
+	// Test edge cases - should succeed
+	successCases := []struct {
+		formula string
+		want    float64
+	}{
+		{"((1+2))", 3},
+		{"(((5)))", 5},
+		{"1+2+3+4", 10},
+		{"10-5-3", 2},
+		{"2*3*4", 24},
+		{"SINH(0)", 0},
+		{"COSH(0)", 1},
+		{"TANH(0)", 0},
+	}
+
+	for _, tt := range successCases {
+		got, ok := eval.Eval(tt.formula)
+		if !ok {
+			t.Errorf("Eval(%q) failed, expected success", tt.formula)
+		} else if math.Abs(got-tt.want) > 0.0001 {
+			t.Errorf("Eval(%q) = %v, want %v", tt.formula, got, tt.want)
+		}
+	}
+
+	// Test EvalFormula function
+	result := EvalFormula(shape, "2+3")
+	if result != "5" {
+		t.Errorf("EvalFormula(2+3) = %q, want '5'", result)
+	}
+
+	// Invalid formula returns original
+	result = EvalFormula(shape, "INVALID()")
+	if result != "INVALID()" {
+		t.Errorf("EvalFormula(INVALID()) = %q, want 'INVALID()'", result)
+	}
+
+	// Empty returns empty
+	result = EvalFormula(shape, "")
+	if result != "" {
+		t.Errorf("EvalFormula('') = %q, want ''", result)
+	}
+}
+
+func TestFormulaMoreFunctions(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	eval := NewFormulaEvaluator(shape)
+
+	// Test RAD conversion
+	rad, ok := eval.Eval("RAD(180)")
+	if !ok {
+		t.Error("RAD(180) failed")
+	} else if math.Abs(rad-math.Pi) > 0.0001 {
+		t.Errorf("RAD(180) = %v, want %v", rad, math.Pi)
+	}
+
+	// Test LOG10
+	log, ok := eval.Eval("LOG10(100)")
+	if !ok {
+		t.Error("LOG10(100) failed")
+	} else if math.Abs(log-2) > 0.0001 {
+		t.Errorf("LOG10(100) = %v, want 2", log)
+	}
+
+	// Test LOG (same as LOG10)
+	log2, ok := eval.Eval("LOG(1000)")
+	if !ok {
+		t.Error("LOG(1000) failed")
+	} else if math.Abs(log2-3) > 0.0001 {
+		t.Errorf("LOG(1000) = %v, want 3", log2)
+	}
+
+	// Test MODULUS (alias for MOD)
+	mod, ok := eval.Eval("MODULUS(17,5)")
+	if !ok {
+		t.Error("MODULUS(17,5) failed")
+	} else if math.Abs(mod-2) > 0.0001 {
+		t.Errorf("MODULUS(17,5) = %v, want 2", mod)
+	}
+
+	// Test BOUND
+	bound, ok := eval.Eval("BOUND(5,0,0,10)")
+	if !ok {
+		t.Error("BOUND(5,0,0,10) failed")
+	} else if math.Abs(bound-5) > 0.0001 {
+		t.Errorf("BOUND(5,0,0,10) = %v, want 5", bound)
+	}
+
+	// Bound clamped low
+	boundLow, ok := eval.Eval("BOUND(-5,0,0,10)")
+	if !ok {
+		t.Error("BOUND(-5,0,0,10) failed")
+	} else if math.Abs(boundLow-0) > 0.0001 {
+		t.Errorf("BOUND(-5,0,0,10) = %v, want 0", boundLow)
+	}
+
+	// Bound clamped high
+	boundHigh, ok := eval.Eval("BOUND(15,0,0,10)")
+	if !ok {
+		t.Error("BOUND(15,0,0,10) failed")
+	} else if math.Abs(boundHigh-10) > 0.0001 {
+		t.Errorf("BOUND(15,0,0,10) = %v, want 10", boundHigh)
+	}
+}
+
+func TestFormulaNilShape(t *testing.T) {
+	// Test with nil shape
+	eval := NewFormulaEvaluator(nil)
+
+	// Basic math should still work
+	v, ok := eval.Eval("2+3")
+	if !ok || v != 5 {
+		t.Error("basic math failed with nil shape")
+	}
+
+	// Cell refs should fail gracefully
+	_, ok = eval.Eval("Width")
+	if ok {
+		t.Error("Width should fail with nil shape")
+	}
+}
+
+func TestSubstituteRefs(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	formula := "Width*0.5"
+	result := SubstituteRefs(shape, formula)
+
+	// Should contain a number instead of "Width"
+	if result == formula {
+		t.Logf("SubstituteRefs returned same formula (shape may have Width=0): %s", result)
+	} else {
+		t.Logf("SubstituteRefs(%q) = %q", formula, result)
+	}
+}
+
+func TestSectionRoundTrip(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Add various sections
+	s.AddScratchCell("42", "", "", "", "", "")
+	s.AddAction("TestAction", "Test Menu", "")
+	s.AddField(0, "Test Value", "")
+	s.AddControl("TestCtrl", 0.5, 0.5, "Test Tip")
+	s.AddTabStop(1.5, 1)
+
+	// Save and reopen
+	tmp := t.TempDir()
+	outPath := tmp + "/sections_test.vsdx"
+	if err := vis.SaveVsdx(outPath); err != nil {
+		t.Fatalf("SaveVsdx: %v", err)
+	}
+
+	vis2, err := Open(outPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer vis2.Close()
+
+	shapes2 := vis2.Pages[0].AllShapes()
+	if len(shapes2) == 0 {
+		t.Fatal("no shapes after reopen")
+	}
+	s2 := shapes2[0]
+
+	// Verify sections persisted
+	if len(s2.ScratchCells()) < 1 {
+		t.Error("scratch cells not persisted")
+	}
+	if len(s2.Actions()) < 1 {
+		t.Error("actions not persisted")
+	}
+	if len(s2.Fields()) < 1 {
+		t.Error("fields not persisted")
+	}
+	if len(s2.Controls()) < 1 {
+		t.Error("controls not persisted")
+	}
+	if len(s2.TabStops()) < 1 {
+		t.Error("tab stops not persisted")
+	}
+
+	t.Log("All sections persisted correctly after round-trip")
+}
