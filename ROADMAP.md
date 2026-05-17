@@ -922,6 +922,119 @@ Met een gemiddelde van ~20 uur/week: **5-6 weken** voor volledige implementatie.
 
 ---
 
+---
+
+## Coverage Targets per Fase
+
+### Huidige Coverage Baseline: 88.6%
+
+| Fase | Target | Strategie |
+|------|--------|-----------|
+| Fase 1 | 90% | Line patterns, arrows zijn makkelijk te testen |
+| Fase 2 | 91% | Gradient/shadow hebben duidelijke output |
+| Fase 3 | 92% | Stencils: round-trip tests |
+| Fase 4 | 93% | Auto-routing: path verification tests |
+| Fase 5 | 94% | Export: golden file comparison |
+| Polish | **95%** | Edge cases, error paths |
+
+### Coverage Regels voor Nieuwe Code
+
+1. **Elke nieuwe public functie**: minimaal 90% coverage
+2. **Elke nieuwe type**: constructor + alle methods getest
+3. **SVG output**: golden file tests (expected output vergelijken)
+4. **Round-trip tests**: create → save → load → verify
+5. **Edge cases**: nil inputs, empty collections, invalid values
+
+### Coverage Monitoring
+
+```bash
+# Run na elke fase:
+go test ./vsdx/... -coverprofile=coverage.out
+go tool cover -func=coverage.out | grep -v "100.0%" | sort -t'%' -k3 -n
+
+# HTML report:
+go tool cover -html=coverage.out -o coverage.html
+```
+
+---
+
+## Quick Coverage Wins (Pre-Roadmap)
+
+Deze functies hebben lage coverage en zijn snel te fixen:
+
+### Prioriteit 1: 0% Coverage (moet gefixt)
+
+| Functie | File | Reden | Fix |
+|---------|------|-------|-----|
+| `geometryCellParent` | geometry.go:483-484 | Marker interface | Accepteer als untestable OF test via type assertion |
+| `extensionFromPath` | svg.go:892 | Unused? | Verwijder of test |
+| `ConvertEMFToSVG` | svg.go:922 | Externe tool nodig | Mock of skip in CI |
+| `MasterToSVG` | svg.go:948 | Niet aangeroepen | Test of verwijder |
+
+### Prioriteit 2: <50% Coverage
+
+| Functie | File | Coverage | Fix |
+|---------|------|----------|-----|
+| `toSlice` | template.go:433 | 13.3% | Test meer slice types |
+| `isTruthy` | template.go:390 | 30.0% | Test alle value types |
+| `cellString` | svg.go:762 | 33.3% | Test formula fallback |
+| `toInterfaceFloat` | template.go:414 | 33.3% | Test int/float/string inputs |
+| `resolvePageIndex` | vsdxfile.go:625 | 41.7% | Test negative index, out of bounds |
+| `evalCellRef` | formula.go:486 | 53.3% | Test meer cell types |
+| `SetValue` (DataProperty) | data_property.go:77 | 57.1% | Test type preservation |
+
+### Prioriteit 3: 60-80% Coverage
+
+| Functie | File | Coverage | Fix |
+|---------|------|----------|-----|
+| `clamp` | svg.go:645 | 60.0% | Test edge values |
+| `MasterShape` | shape.go:153 | 69.2% | Test nil cases |
+| `MasterPage` | shape.go:176 | 66.7% | Test missing master |
+| `CellFormula` | shape.go:197 | 66.7% | Test formula inheritance |
+| `SubstituteRefs` | formula.go:578 | 70.0% | Test function name skipping |
+| `Page.Width/Height` | page.go:85,98 | 71.4% | Test missing PageSheet |
+
+### Test Template voor Quick Fixes
+
+```go
+func TestLowCoverageFunction(t *testing.T) {
+    tests := []struct {
+        name    string
+        input   interface{}
+        want    interface{}
+        wantErr bool
+    }{
+        {"nil input", nil, defaultValue, false},
+        {"empty input", "", defaultValue, false},
+        {"valid input", validInput, expectedOutput, false},
+        {"invalid input", invalidInput, nil, true},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := functionUnderTest(tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+            }
+            if got != tt.want {
+                t.Errorf("got %v, want %v", got, tt.want)
+            }
+        })
+    }
+}
+```
+
+### Geschatte Impact
+
+| Actie | Coverage Boost |
+|-------|----------------|
+| Fix 0% functies | +0.3% |
+| Fix <50% functies | +0.8% |
+| Fix 60-80% functies | +0.5% |
+| **Totaal** | **+1.6%** → **90.2%** |
+
+---
+
 ## Conclusie
 
 Na implementatie van dit roadmap heeft vsdx-go:
