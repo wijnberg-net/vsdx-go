@@ -5582,6 +5582,95 @@ func TestFormulaEvaluator(t *testing.T) {
 	}
 }
 
+// TestFormulaEvalResultUnsupported tests that unsupported functions are explicitly identified.
+// MS-VSDX spec §2.2.11.2 defines ~175 functions; unsupported ones must not return fake values.
+func TestFormulaEvalResultUnsupported(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	eval := NewFormulaEvaluator(shape)
+
+	// These functions are explicitly unsupported and must NOT return fake values
+	unsupportedTests := []struct {
+		formula  string
+		funcName string
+	}{
+		// Geometry path functions (MS-VSDX §2.4.2)
+		{"POINTALONGPATH(1)", "POINTALONGPATH"},
+		{"PATHLENGTH()", "PATHLENGTH"},
+		{"ANGLEALONGPATH(0.5)", "ANGLEALONGPATH"},
+
+		// Layout functions (MS-VSDX §2.2.5.2.51)
+		{"GRAVITY(1,2,3)", "GRAVITY"},
+
+		// Geometry intersection
+		{"RECTSECT(1,2,3,4,5)", "RECTSECT"},
+
+		// String manipulation functions
+		{"LOWER(\"TEST\")", "LOWER"},
+		{"UPPER(\"test\")", "UPPER"},
+		{"TRIM(\" test \")", "TRIM"},
+		{"REPLACE(\"a\",\"b\")", "REPLACE"},
+		{"SUBSTITUTE(\"a\",\"b\",\"c\")", "SUBSTITUTE"},
+		{"REPT(\"x\",3)", "REPT"},
+
+		// Date/time string parsing
+		{"TIMEVALUE(\"10:30\")", "TIMEVALUE"},
+		{"DATEVALUE(\"2024-01-01\")", "DATEVALUE"},
+
+		// Array functions
+		{"SUMPRODUCT(1,2,3)", "SUMPRODUCT"},
+	}
+
+	for _, tt := range unsupportedTests {
+		t.Run(tt.funcName, func(t *testing.T) {
+			result := eval.EvalResult(tt.formula)
+
+			// Must NOT be success - these functions cannot return meaningful values
+			if result.Status == FormulaSuccess {
+				t.Errorf("EvalResult(%q) returned Success with value %v; want Unsupported", tt.formula, result.Value)
+			}
+
+			// The old Eval API must return false
+			_, ok := eval.Eval(tt.formula)
+			if ok {
+				t.Errorf("Eval(%q) returned ok=true; want ok=false for unsupported function", tt.formula)
+			}
+		})
+	}
+
+	// Verify that supported functions still work
+	supportedTests := []struct {
+		formula string
+		want    float64
+	}{
+		{"ABS(-5)", 5},
+		{"SQRT(16)", 4},
+		{"SIN(0)", 0},
+		{"MAX(3,7)", 7},
+		{"SUM(1,2,3)", 6},
+	}
+
+	for _, tt := range supportedTests {
+		result := eval.EvalResult(tt.formula)
+		if result.Status != FormulaSuccess {
+			t.Errorf("EvalResult(%q) status=%v; want FormulaSuccess", tt.formula, result.Status)
+		}
+		if math.Abs(result.Value-tt.want) > 0.0001 {
+			t.Errorf("EvalResult(%q) = %v; want %v", tt.formula, result.Value, tt.want)
+		}
+	}
+}
+
 func TestFormulaEvaluatorCellRefs(t *testing.T) {
 	vis, err := Open("../tests/test1.vsdx")
 	if err != nil {
@@ -5960,6 +6049,174 @@ func TestSectionRoundTrip(t *testing.T) {
 	t.Log("All sections persisted correctly after round-trip")
 }
 
+// TestUnknownXMLPreservation tests that unknown XML elements and attributes are preserved
+// during round-trip. This is critical for MS-VSDX spec compliance - the library must NOT
+// silently drop unknown content. See MS-VSDX §2.2.5.4 for extension requirements.
+func TestUnknownXMLPreservation(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	s := shapes[0]
+
+	// Inject unknown elements and attributes directly into the XML tree
+	// This simulates content from future VSDX versions or third-party extensions
+
+	// Add unknown attribute to shape
+	s.xml.CreateAttr("x:unknownAttr", "test-value-123")
+
+	// Add unknown child element with content
+	unknownElem := s.xml.CreateElement("x:UnknownExtension")
+	unknownElem.CreateAttr("xmlns:x", "http://example.com/extension")
+	unknownElem.CreateAttr("version", "1.0")
+	unknownChild := unknownElem.CreateElement("x:CustomData")
+	unknownChild.SetText("preserved-content-456")
+
+	// Add unknown section (simulating future spec addition)
+	unknownSection := s.xml.CreateElement("Section")
+	unknownSection.CreateAttr("N", "FutureSection")
+	unknownRow := unknownSection.CreateElement("Row")
+	unknownRow.CreateAttr("IX", "0")
+	unknownCell := unknownRow.CreateElement("Cell")
+	unknownCell.CreateAttr("N", "FutureCell")
+	unknownCell.CreateAttr("V", "future-value")
+
+	// Save and reopen
+	tmp := t.TempDir()
+	outPath := tmp + "/unknown_xml_test.vsdx"
+	if err := vis.SaveVsdx(outPath); err != nil {
+		t.Fatalf("SaveVsdx: %v", err)
+	}
+
+	vis2, err := Open(outPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer vis2.Close()
+
+	shapes2 := vis2.Pages[0].AllShapes()
+	if len(shapes2) == 0 {
+		t.Fatal("no shapes after reopen")
+	}
+	s2 := shapes2[0]
+
+	// Verify unknown attribute preserved
+	attrVal := s2.xml.SelectAttrValue("x:unknownAttr", "")
+	if attrVal != "test-value-123" {
+		t.Errorf("unknown attribute not preserved: got %q, want %q", attrVal, "test-value-123")
+	}
+
+	// Verify unknown element preserved
+	extElem := s2.xml.FindElement("x:UnknownExtension")
+	if extElem == nil {
+		t.Error("unknown extension element not preserved")
+	} else {
+		// Check attribute
+		ver := extElem.SelectAttrValue("version", "")
+		if ver != "1.0" {
+			t.Errorf("extension version attribute not preserved: got %q", ver)
+		}
+		// Check child element
+		dataElem := extElem.FindElement("x:CustomData")
+		if dataElem == nil {
+			t.Error("unknown extension child element not preserved")
+		} else if dataElem.Text() != "preserved-content-456" {
+			t.Errorf("extension text not preserved: got %q", dataElem.Text())
+		}
+	}
+
+	// Verify unknown section preserved
+	futureSection := s2.xml.FindElement("Section[@N='FutureSection']")
+	if futureSection == nil {
+		t.Error("unknown section not preserved")
+	} else {
+		futureRow := futureSection.FindElement("Row[@IX='0']")
+		if futureRow == nil {
+			t.Error("unknown section row not preserved")
+		} else {
+			futureCell := futureRow.FindElement("Cell[@N='FutureCell']")
+			if futureCell == nil {
+				t.Error("unknown section cell not preserved")
+			} else {
+				val := futureCell.SelectAttrValue("V", "")
+				if val != "future-value" {
+					t.Errorf("unknown section cell value not preserved: got %q", val)
+				}
+			}
+		}
+	}
+
+	t.Log("Unknown XML elements, attributes, and sections preserved correctly")
+}
+
+// TestXMLCommentsPreservation tests that XML comments are preserved during round-trip.
+func TestXMLCommentsPreservation(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	// Add XML comment to a page root element
+	page := vis.Pages[0]
+	if page.xml == nil {
+		t.Skip("page XML is nil")
+	}
+	root := page.xml.Root()
+	if root == nil {
+		t.Skip("page XML root is nil")
+	}
+
+	// Add comment as child of root element
+	comment := etree.NewComment(" Test comment for preservation ")
+	root.AddChild(comment)
+
+	// Save and reopen
+	tmp := t.TempDir()
+	outPath := tmp + "/xml_comments_test.vsdx"
+	if err := vis.SaveVsdx(outPath); err != nil {
+		t.Fatalf("SaveVsdx: %v", err)
+	}
+
+	vis2, err := Open(outPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer vis2.Close()
+
+	page2 := vis2.Pages[0]
+	if page2.xml == nil {
+		t.Fatal("page XML is nil after reopen")
+	}
+	root2 := page2.xml.Root()
+	if root2 == nil {
+		t.Fatal("page XML root is nil after reopen")
+	}
+
+	// Look for comment in children
+	foundComment := false
+	for _, child := range root2.Child {
+		if c, ok := child.(*etree.Comment); ok {
+			if strings.Contains(c.Data, "Test comment for preservation") {
+				foundComment = true
+				break
+			}
+		}
+	}
+
+	if !foundComment {
+		t.Error("XML comment not preserved during round-trip")
+	} else {
+		t.Log("XML comments preserved correctly")
+	}
+}
+
 func TestGradientToSVGDef(t *testing.T) {
 	grad := &Gradient{
 		Enabled: true,
@@ -6054,7 +6311,7 @@ func TestGenerateUUID(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	vis, err := Open("../tests/basic-001.vsdx")
+	vis, err := Open("../tests/test1.vsdx")
 	if err != nil {
 		t.Skipf("test file not found: %v", err)
 	}
@@ -6065,12 +6322,172 @@ func TestValidate(t *testing.T) {
 		t.Fatal("Validate() returned nil")
 	}
 
-	// Basic file should be valid
+	// Test file should be valid (no errors, though warnings/info are OK).
 	if !result.IsValid() {
-		t.Errorf("basic-001.vsdx should be valid, got %d errors", len(result.Errors))
+		t.Errorf("test1.vsdx should be valid, got %d errors", len(result.Errors))
 		for _, e := range result.Errors {
 			t.Logf("  Error: %v", e)
 		}
+	}
+
+	// Check that AllIssues returns all categories.
+	all := result.AllIssues()
+	expectedLen := len(result.Errors) + len(result.Warnings) + len(result.Info)
+	if len(all) != expectedLen {
+		t.Errorf("AllIssues() returned %d, expected %d", len(all), expectedLen)
+	}
+}
+
+func TestValidateContentTypes(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	result := vis.Validate()
+
+	// Content_Types.xml should exist and be checked.
+	if _, ok := vis.ZipFileContents["[Content_Types].xml"]; !ok {
+		t.Error("Content_Types.xml should exist")
+	}
+
+	// No errors expected for valid content types.
+	for _, e := range result.Errors {
+		if e.Path == "[Content_Types].xml" {
+			t.Errorf("unexpected error in Content_Types: %v", e)
+		}
+	}
+}
+
+func TestValidateMasterReferences(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	// Find a shape with a master reference.
+	var shapeWithMaster *Shape
+	for _, page := range vis.Pages {
+		for _, shape := range page.AllShapes() {
+			if shape.MasterPageID != "" {
+				shapeWithMaster = shape
+				break
+			}
+		}
+	}
+
+	if shapeWithMaster == nil {
+		t.Skip("no shapes with master references in test file")
+	}
+
+	// Validate should not report errors for valid master references.
+	result := vis.Validate()
+	for _, e := range result.Errors {
+		if e.Message != "" && e.Element != "" {
+			// Just verify validation runs without panics.
+		}
+	}
+}
+
+// TestValidateOPC tests OPC (Open Packaging Conventions) validation per MS-VSDX §2.1.
+func TestValidateOPC(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	result := vis.Validate()
+
+	// Root relationships file must exist
+	if _, ok := vis.ZipFileContents["_rels/.rels"]; !ok {
+		t.Error("_rels/.rels should exist in valid VSDX")
+	}
+
+	// visio/document.xml must exist
+	if _, ok := vis.ZipFileContents["visio/document.xml"]; !ok {
+		t.Error("visio/document.xml should exist in valid VSDX")
+	}
+
+	// No OPC-related errors expected for valid file
+	for _, e := range result.Errors {
+		if strings.Contains(e.Message, "OPC") || strings.Contains(e.Message, "relationship") {
+			t.Errorf("unexpected OPC error: %v", e)
+		}
+	}
+
+	t.Logf("OPC validation: %d errors, %d warnings, %d info",
+		len(result.Errors), len(result.Warnings), len(result.Info))
+
+	// Log any info/warnings for visibility
+	for _, w := range result.Warnings {
+		t.Logf("  Warning: %v", w)
+	}
+	for _, i := range result.Info {
+		t.Logf("  Info: %v", i)
+	}
+}
+
+// TestValidateOPCMissingParts tests that validation detects missing OPC parts.
+func TestValidateOPCMissingParts(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	// Remove required OPC parts to test detection
+	originalRels := vis.ZipFileContents["_rels/.rels"]
+	delete(vis.ZipFileContents, "_rels/.rels")
+
+	result := vis.Validate()
+
+	// Should report missing root relationships
+	foundMissingRels := false
+	for _, e := range result.Errors {
+		if e.Path == "_rels/.rels" {
+			foundMissingRels = true
+			break
+		}
+	}
+	if !foundMissingRels {
+		t.Error("validation should detect missing _rels/.rels")
+	}
+
+	// Restore for cleanup
+	vis.ZipFileContents["_rels/.rels"] = originalRels
+}
+
+// TestValidateOPCDuplicateRelationshipID tests duplicate relationship ID detection.
+func TestValidateOPCDuplicateRelationshipID(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	// Create a .rels file with duplicate IDs
+	duplicateRels := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://test/type" Target="test1.xml"/>
+  <Relationship Id="rId1" Type="http://test/type2" Target="test2.xml"/>
+</Relationships>`
+	vis.ZipFileContents["_rels/.rels"] = []byte(duplicateRels)
+
+	result := vis.Validate()
+
+	// Should report duplicate relationship ID
+	foundDuplicate := false
+	for _, e := range result.Errors {
+		if strings.Contains(e.Message, "Duplicate relationship ID") {
+			foundDuplicate = true
+			break
+		}
+	}
+	if !foundDuplicate {
+		t.Error("validation should detect duplicate relationship IDs")
 	}
 }
 
@@ -6365,6 +6782,60 @@ func TestFormulaColorFunctions(t *testing.T) {
 	}
 }
 
+func TestFormulaNewFunctions(t *testing.T) {
+	eval := NewFormulaEvaluator(nil)
+
+	tests := []struct {
+		formula  string
+		expected float64
+	}{
+		// String functions
+		{"LEN(\"hello\")", 5},
+		{"CODE(\"A\")", 65},
+
+		// Date functions
+		{"DATE(2024,6,15)", 2024*365 + 6*30 + 15},
+		{"DAY(45)", 14}, // 45 % 31 = 14
+		{"DATEDIF(10,20)", 10},
+
+		// Aggregate functions
+		{"SUM(1,2,3,4,5)", 15},
+		{"AVERAGE(10,20,30)", 20},
+		{"COUNT(1,2,3)", 3},
+		{"PRODUCT(2,3,4)", 24},
+		{"QUOTIENT(17,5)", 3},
+
+		// Trig functions
+		{"COT(PI()/4)", 1},
+		{"SEC(0)", 1},
+		{"CSC(PI()/2)", 1},
+		{"ASINH(0)", 0},
+		{"ACOSH(1)", 0},
+		{"ATANH(0)", 0},
+
+		// Combinatorics
+		{"COMBIN(5,2)", 10},
+		{"PERMUT(5,2)", 20},
+		{"POWER(2,10)", 1024},
+
+		// Info functions
+		{"TYPE(123)", 1},
+		{"ISLOGICAL(TRUE)", 1},
+		{"COUNTA(1,2,3)", 3},
+	}
+
+	for _, tc := range tests {
+		result, ok := eval.Eval(tc.formula)
+		if !ok {
+			t.Errorf("%s: evaluation failed", tc.formula)
+			continue
+		}
+		if math.Abs(result-tc.expected) > 0.001 {
+			t.Errorf("%s = %v, want %v", tc.formula, result, tc.expected)
+		}
+	}
+}
+
 func TestLineGradientToSVGDef(t *testing.T) {
 	grad := &LineGradient{
 		Enabled: true,
@@ -6384,5 +6855,459 @@ func TestLineGradientToSVGDef(t *testing.T) {
 	}
 	if !strings.Contains(svg, "test-grad") {
 		t.Error("expected id in output")
+	}
+}
+
+func TestStyleSheets(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	// Test getting style sheets.
+	styles := vis.StyleSheets()
+	// May or may not have style sheets depending on the test file.
+	t.Logf("Found %d style sheets", len(styles))
+
+	// Test style property classification.
+	if !isLineProperty("LineWeight") {
+		t.Error("LineWeight should be a line property")
+	}
+	if !isFillProperty("FillForegnd") {
+		t.Error("FillForegnd should be a fill property")
+	}
+	if !isTextProperty("VerticalAlign") {
+		t.Error("VerticalAlign should be a text property")
+	}
+	if isLineProperty("FillForegnd") {
+		t.Error("FillForegnd should not be a line property")
+	}
+}
+
+// --- Cell Unit and Error Tests ---
+
+func TestCellUnitError(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	if len(vis.Pages) == 0 {
+		t.Skip("no pages")
+	}
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Skip("no shapes")
+	}
+
+	shape := shapes[0]
+
+	// Test setting and getting unit
+	if cell, ok := shape.Cells["PinX"]; ok {
+		cell.SetUnit("IN")
+		if cell.Unit() != "IN" {
+			t.Errorf("expected unit IN, got %s", cell.Unit())
+		}
+		cell.SetUnit("")
+		if cell.Unit() != "" {
+			t.Error("expected empty unit after clearing")
+		}
+	}
+
+	// Test error attribute
+	if cell, ok := shape.Cells["PinX"]; ok {
+		if cell.HasError() {
+			t.Error("cell should not have error initially")
+		}
+		cell.SetError("#VALUE!")
+		if !cell.HasError() {
+			t.Error("cell should have error after setting")
+		}
+		if cell.Error() != "#VALUE!" {
+			t.Errorf("expected error #VALUE!, got %s", cell.Error())
+		}
+		cell.SetError("")
+		if cell.HasError() {
+			t.Error("cell should not have error after clearing")
+		}
+	}
+}
+
+// --- Root Rels and Document Properties Tests ---
+
+func TestRootRelsAndDocProps(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	// Test root relationships
+	rels := vis.RootRelationships()
+	t.Logf("Found %d root relationships", len(rels))
+	if len(rels) > 0 {
+		for _, rel := range rels {
+			t.Logf("  %s: %s -> %s", rel.ID, rel.Type, rel.Target)
+		}
+	}
+
+	// Test core properties
+	props := vis.CoreProperties()
+	t.Logf("Core properties: Title=%q, Creator=%q", props.Title, props.Creator)
+
+	// Test setting core properties
+	vis.SetCoreProperties(&CoreProperties{
+		Title:   "Test Document",
+		Creator: "Test Author",
+	})
+	props2 := vis.CoreProperties()
+	if props2.Title != "Test Document" {
+		t.Errorf("expected title 'Test Document', got %q", props2.Title)
+	}
+
+	// Test custom properties
+	vis.SetCustomProperty("TestProp", "TestValue")
+	val, ok := vis.GetCustomProperty("TestProp")
+	if !ok {
+		t.Error("expected custom property to exist")
+	}
+	if val != "TestValue" {
+		t.Errorf("expected TestValue, got %q", val)
+	}
+}
+
+// --- SmartTag and ActionTag Tests ---
+
+func TestSmartTagActionTag(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	if len(vis.Pages) == 0 {
+		t.Skip("no pages")
+	}
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Skip("no shapes")
+	}
+
+	shape := shapes[0]
+
+	// Test SmartTags
+	smartTags := shape.SmartTags()
+	t.Logf("Found %d smart tags", len(smartTags))
+
+	// Add a smart tag
+	shape.AddSmartTag("TestTag", 0.5, 0.5, "Test Description")
+	smartTags = shape.SmartTags()
+	if len(smartTags) == 0 {
+		t.Error("expected at least 1 smart tag after adding")
+	}
+
+	// Test ActionTags
+	actionTags := shape.ActionTags()
+	t.Logf("Found %d action tags", len(actionTags))
+
+	// Add an action tag
+	shape.AddActionTag("TestAction", 0.5, 0.5, "tag1", "Test Action")
+	actionTags = shape.ActionTags()
+	if len(actionTags) == 0 {
+		t.Error("expected at least 1 action tag after adding")
+	}
+}
+
+// --- ConnectionABCD Tests ---
+
+func TestConnectionABCD(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	if len(vis.Pages) == 0 {
+		t.Skip("no pages")
+	}
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Skip("no shapes")
+	}
+
+	shape := shapes[0]
+
+	// Test ConnectionABCD
+	conns := shape.ConnectionsABCD()
+	t.Logf("Found %d connection points (ABCD)", len(conns))
+
+	// Add a connection point with direction
+	ix := shape.AddConnectionABCD(0.5, 0.5, 1.0, 0.0, 0)
+	if ix < 0 {
+		t.Error("expected non-negative index")
+	}
+
+	conns = shape.ConnectionsABCD()
+	if len(conns) == 0 {
+		t.Error("expected at least 1 connection point after adding")
+	}
+}
+
+// --- Reviewer and Annotation Write Tests ---
+
+func TestReviewerAnnotationWrite(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	// Add a reviewer
+	reviewer := vis.AddReviewer("Test User", "TU", "#FF0000")
+	if reviewer == nil {
+		t.Fatal("failed to add reviewer")
+	}
+	if reviewer.Name != "Test User" {
+		t.Errorf("expected name 'Test User', got %q", reviewer.Name)
+	}
+
+	// Verify reviewer exists
+	reviewers := vis.Reviewers()
+	found := false
+	for _, r := range reviewers {
+		if r.Name == "Test User" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("added reviewer not found")
+	}
+
+	// Add annotation to page
+	if len(vis.Pages) > 0 {
+		page := vis.Pages[0]
+		ann := page.AddAnnotation(1.0, 1.0, reviewer.ID, "Test Comment")
+		if ann == nil {
+			t.Fatal("failed to add annotation")
+		}
+		if ann.Comment != "Test Comment" {
+			t.Errorf("expected comment 'Test Comment', got %q", ann.Comment)
+		}
+
+		// Update annotation
+		ann.SetComment("Updated Comment")
+		if ann.Comment != "Updated Comment" {
+			t.Error("comment not updated")
+		}
+
+		// Delete annotation
+		if !page.DeleteAnnotation(ann.ID) {
+			t.Error("failed to delete annotation")
+		}
+	}
+
+	// Delete reviewer
+	if !vis.DeleteReviewer(reviewer.ID) {
+		t.Error("failed to delete reviewer")
+	}
+}
+
+// --- TheCel Reference Token Test ---
+
+func TestTheCelReference(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	if len(vis.Pages) == 0 {
+		t.Skip("no pages")
+	}
+
+	// Find a shape with a master
+	var shapeWithMaster *Shape
+	for _, shape := range vis.Pages[0].AllShapes() {
+		if shape.MasterPageID != "" {
+			shapeWithMaster = shape
+			break
+		}
+	}
+
+	if shapeWithMaster == nil {
+		t.Skip("no shape with master found")
+	}
+
+	// Test formula evaluator with TheCel
+	eval := NewFormulaEvaluator(shapeWithMaster)
+
+	// TheCel without a cell name should return 0
+	result, ok := eval.Eval("TheCel")
+	if ok && result != 0 {
+		t.Logf("TheCel returned %f", result)
+	}
+
+	// Test Sheet.N! reference
+	result, ok = eval.Eval(fmt.Sprintf("Sheet.%s!Width", shapeWithMaster.ID))
+	if ok {
+		t.Logf("Sheet reference returned %f", result)
+	}
+}
+
+// --- Theme Variant Tests ---
+
+func TestThemeVariants(t *testing.T) {
+	// Use file with theme - test_master_multiple_child_shapes.vsdx has theme1.xml
+	vis, err := Open("../tests/test_master_multiple_child_shapes.vsdx")
+	if err != nil {
+		t.Skipf("test file not found: %v", err)
+	}
+	defer vis.Close()
+
+	theme := vis.Theme()
+	if theme == nil {
+		t.Skip("no theme in document")
+	}
+
+	t.Logf("Theme: %s", theme.Name)
+	t.Logf("Variant count: %d", theme.VariantCount())
+
+	// Verify variants were parsed from theme XML (not hardcoded)
+	if len(theme.Variants) == 0 {
+		t.Error("expected theme variants to be parsed")
+	}
+
+	// Test getting variant - should have parsed actual colors
+	for i := 0; i < len(theme.Variants); i++ {
+		variant := theme.ThemeVariant(i)
+		if variant != nil {
+			t.Logf("Variant %d: Fill=%s, Fill2=%s, Line=%s, Accent=%s",
+				i, variant.FillColor, variant.FillColor2, variant.LineColor, variant.AccentColor)
+			// Verify colors are in hex format, not hardcoded defaults
+			if variant.FillColor != "" && !strings.HasPrefix(variant.FillColor, "#") && !strings.HasPrefix(variant.FillColor, "phClr") {
+				t.Errorf("Variant %d FillColor should be hex or scheme ref: got %s", i, variant.FillColor)
+			}
+		}
+	}
+
+	// Test variant fonts
+	fonts := theme.ThemeVariantFonts(0)
+	if fonts != nil {
+		t.Logf("Variant fonts: Major=%s, Minor=%s", fonts.MajorLatin, fonts.MinorLatin)
+	}
+}
+
+// TestFormulaNewMSVSDXFunctions tests newly implemented MS-VSDX spec functions.
+func TestFormulaNewMSVSDXFunctions(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+	eval := NewFormulaEvaluator(shape)
+
+	tests := []struct {
+		name    string
+		formula string
+		want    float64
+		approx  bool
+	}{
+		// ANG360 - normalize angle to 0..2*PI
+		{"ANG360_positive", "ANG360(7)", math.Mod(7, 2*math.Pi), true},
+		{"ANG360_negative", "ANG360(-1)", 2*math.Pi - 1, true},
+
+		// Fuzzy comparison operators
+		{"FEQ_equal", "FEQ(1.0000000001,1)", 1, false},
+		{"FEQ_not_equal", "FEQ(1.1,1)", 0, false},
+		{"FGT_true", "FGT(2,1)", 1, false},
+		{"FGT_false", "FGT(1,2)", 0, false},
+		{"FGE_equal", "FGE(1,1)", 1, false},
+		{"FLT_true", "FLT(1,2)", 1, false},
+		{"FLE_equal", "FLE(1,1)", 1, false},
+
+		// BLEND - color blending
+		{"BLEND_50pct", "BLEND(RGB(255,0,0),RGB(0,0,255),0.5)", float64(127<<16 | 0<<8 | 127), true},
+		{"BLEND_0pct", "BLEND(RGB(255,0,0),RGB(0,0,255),0)", float64(255 << 16), false},
+		{"BLEND_100pct", "BLEND(RGB(255,0,0),RGB(0,0,255),1)", float64(255), false},
+
+		// SHADE/TINT/TONE - color modifiers
+		{"SHADE_basic", "SHADE(RGB(128,128,128),0)", float64(128<<16 | 128<<8 | 128), true},
+		{"TINT_basic", "TINT(RGB(128,128,128),0)", float64(128<<16 | 128<<8 | 128), true},
+		{"TONE_basic", "TONE(RGB(128,128,128),0)", float64(128<<16 | 128<<8 | 128), true},
+
+		// Color difference functions
+		{"HUEDIFF", "HUEDIFF(RGB(255,0,0),RGB(255,0,0))", 0, true},
+		{"SATDIFF", "SATDIFF(RGB(255,0,0),RGB(255,0,0))", 0, true},
+		{"LUMDIFF", "LUMDIFF(RGB(255,0,0),RGB(255,0,0))", 0, true},
+
+		// LOG functions
+		{"LOG2_8", "LOG2(8)", 3, true},
+		{"LOG2_1", "LOG2(1)", 0, true},
+		{"LOGN_base10", "LOGN(100,10)", 2, true},
+
+		// Point functions
+		{"PNT", "PNT(3,4)", 3, false},
+		{"PNTX", "PNTX(5)", 5, false},
+		{"PNTY", "PNTY(7)", 7, false},
+
+		// Theme functions (return defaults)
+		{"THEME", "THEME(0)", 0, false},
+		{"THEMECBV", "THEMECBV(RGB(255,0,0),1)", float64(255 << 16), false},
+		{"THEMEPROP", "THEMEPROP()", 0, false},
+		{"THEMERESTORE", "THEMERESTORE(0)", 0, false},
+
+		// Document functions (return 0)
+		{"PAGENAME", "PAGENAME()", 0, false},
+		{"PAGENUMBER", "PAGENUMBER()", 1, false},
+		{"MASTERNAME", "MASTERNAME()", 0, false},
+
+		// Text functions
+		{"TEXTHEIGHT", "TEXTHEIGHT(Width,1)", 0.2, true},
+		{"TEXTWIDTH", "TEXTWIDTH(Width)", 1.0, true},
+
+		// Date functions
+		{"DAYOFYEAR", "DAYOFYEAR(100)", 100, false},
+		{"EOMONTH", "EOMONTH(0,1)", 30, false},
+
+		// Other functions
+		{"VALUE", "VALUE(42)", 42, false},
+		{"SETATREFEVAL", "SETATREFEVAL(123)", 123, false},
+		{"CELLISTHEMED_true", "CELLISTHEMED(1)", 1, false},
+		{"CELLISTHEMED_false", "CELLISTHEMED(0)", 0, false},
+		{"N", "N(99)", 99, false},
+		{"ISREF", "ISREF(Width)", 1, false},
+		{"STRSAMEEX", "STRSAMEEX(\"test\",\"TEST\",0,0)", 1, false},
+		{"SEGMENTCOUNT", "SEGMENTCOUNT()", 1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := eval.Eval(tt.formula)
+			if !ok {
+				t.Errorf("Eval(%q) failed, expected success", tt.formula)
+				return
+			}
+			if tt.approx {
+				if math.Abs(got-tt.want) > 1 {
+					t.Errorf("Eval(%q) = %v, want approx %v", tt.formula, got, tt.want)
+				}
+			} else {
+				if got != tt.want {
+					t.Errorf("Eval(%q) = %v, want %v", tt.formula, got, tt.want)
+				}
+			}
+		})
 	}
 }

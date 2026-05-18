@@ -256,3 +256,200 @@ func (p *Page) Annotations() []*Annotation {
 
 	return annotations
 }
+
+// --- Reviewer Write Support ---
+
+// AddReviewer adds a reviewer to the document and returns the new Reviewer.
+func (v *VisioFile) AddReviewer(name, initials, color string) *Reviewer {
+	if v.documentXML == nil {
+		return nil
+	}
+
+	// Find or create Reviewer section
+	section := v.documentXML.FindElement("//Section[@N='Reviewer']")
+	if section == nil {
+		docSheet := v.documentXML.FindElement("DocumentSheet")
+		if docSheet == nil {
+			docSheet = v.documentXML.Root()
+		}
+		if docSheet == nil {
+			return nil
+		}
+		section = docSheet.CreateElement("Section")
+		section.CreateAttr("N", "Reviewer")
+	}
+
+	// Find next ID
+	maxID := -1
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "0")); err == nil && ix > maxID {
+			maxID = ix
+		}
+	}
+	newID := maxID + 1
+
+	// Create row
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", strconv.Itoa(newID))
+
+	addReviewerCell(row, "Name", name)
+	addReviewerCell(row, "Initials", initials)
+	addReviewerCell(row, "Color", color)
+	addReviewerCell(row, "ReviewerID", strconv.Itoa(newID+1))
+	addReviewerCell(row, "CurrentIndex", "0")
+
+	return &Reviewer{
+		ID:           newID,
+		Name:         name,
+		Initials:     initials,
+		Color:        color,
+		ReviewerID:   newID + 1,
+		CurrentIndex: 0,
+		xml:          row,
+	}
+}
+
+// addReviewerCell adds a cell to a reviewer row.
+func addReviewerCell(row *etree.Element, name, value string) {
+	cell := row.CreateElement("Cell")
+	cell.CreateAttr("N", name)
+	cell.CreateAttr("V", value)
+}
+
+// DeleteReviewer removes a reviewer from the document.
+func (v *VisioFile) DeleteReviewer(id int) bool {
+	if v.documentXML == nil {
+		return false
+	}
+
+	section := v.documentXML.FindElement("//Section[@N='Reviewer']")
+	if section == nil {
+		return false
+	}
+
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "")); err == nil && ix == id {
+			section.RemoveChild(row)
+			return true
+		}
+	}
+
+	return false
+}
+
+// --- Annotation Write Support ---
+
+// AddAnnotation adds an annotation to the page and returns the new Annotation.
+func (p *Page) AddAnnotation(x, y float64, reviewerID int, comment string) *Annotation {
+	if p.xml == nil {
+		return nil
+	}
+
+	// Find or create Annotation section in PageSheet
+	pageSheet := p.pagesheetXML()
+	if pageSheet == nil {
+		pageSheet = p.xml.Root().CreateElement("PageSheet")
+	}
+
+	section := pageSheet.FindElement("Section[@N='Annotation']")
+	if section == nil {
+		section = pageSheet.CreateElement("Section")
+		section.CreateAttr("N", "Annotation")
+	}
+
+	// Find next ID
+	maxID := -1
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "0")); err == nil && ix > maxID {
+			maxID = ix
+		}
+	}
+	newID := maxID + 1
+
+	// Create row
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", strconv.Itoa(newID))
+
+	addAnnotationCell(row, "X", strconv.FormatFloat(x, 'f', -1, 64))
+	addAnnotationCell(row, "Y", strconv.FormatFloat(y, 'f', -1, 64))
+	addAnnotationCell(row, "ReviewerID", strconv.Itoa(reviewerID))
+	addAnnotationCell(row, "MarkerIndex", strconv.Itoa(newID))
+	addAnnotationCell(row, "Comment", comment)
+	addAnnotationCell(row, "Date", "") // Empty date, can be set later
+
+	return &Annotation{
+		ID:         newID,
+		X:          x,
+		Y:          y,
+		ReviewerID: reviewerID,
+		MarkerID:   newID,
+		Comment:    comment,
+		xml:        row,
+	}
+}
+
+// addAnnotationCell adds a cell to an annotation row.
+func addAnnotationCell(row *etree.Element, name, value string) {
+	cell := row.CreateElement("Cell")
+	cell.CreateAttr("N", name)
+	cell.CreateAttr("V", value)
+}
+
+// DeleteAnnotation removes an annotation from the page.
+func (p *Page) DeleteAnnotation(id int) bool {
+	if p.xml == nil {
+		return false
+	}
+
+	pageSheet := p.pagesheetXML()
+	if pageSheet == nil {
+		return false
+	}
+
+	section := pageSheet.FindElement("Section[@N='Annotation']")
+	if section == nil {
+		return false
+	}
+
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "")); err == nil && ix == id {
+			section.RemoveChild(row)
+			return true
+		}
+	}
+
+	return false
+}
+
+// SetComment updates the comment text of an annotation.
+func (a *Annotation) SetComment(comment string) {
+	if a.xml == nil {
+		return
+	}
+	for _, cell := range a.xml.SelectElements("Cell") {
+		if cell.SelectAttrValue("N", "") == "Comment" {
+			cell.CreateAttr("V", comment)
+			a.Comment = comment
+			return
+		}
+	}
+	// Cell doesn't exist, create it
+	addAnnotationCell(a.xml, "Comment", comment)
+	a.Comment = comment
+}
+
+// SetDate updates the date of an annotation.
+func (a *Annotation) SetDate(date string) {
+	if a.xml == nil {
+		return
+	}
+	for _, cell := range a.xml.SelectElements("Cell") {
+		if cell.SelectAttrValue("N", "") == "Date" {
+			cell.CreateAttr("V", date)
+			a.Date = date
+			return
+		}
+	}
+	addAnnotationCell(a.xml, "Date", date)
+	a.Date = date
+}

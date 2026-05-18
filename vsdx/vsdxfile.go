@@ -35,10 +35,12 @@ type VisioFile struct {
 	appXML          *etree.Document
 	documentXML     *etree.Document
 	documentXMLRels *etree.Document
-	mastersXML      *etree.Element // root element of masters.xml
+	rootRelsXML     *etree.Document // _rels/.rels - package relationships
+	coreXML         *etree.Document // docProps/core.xml - core properties
+	customXML       *etree.Document // docProps/custom.xml - custom properties
+	mastersXML      *etree.Element  // root element of masters.xml
 	masterIndex     map[string]*Page
 	cachedMedia     *Media
-	// debug field removed - use ParseOptions.ErrorHandler for debugging
 }
 
 // IsStencil returns true if this file is a stencil (.vssx/.vssm) with master shapes but no pages.
@@ -238,6 +240,12 @@ func (v *VisioFile) loadPages() error {
 func (v *VisioFile) loadCommonXML() error {
 	var err error
 
+	// Package relationships (root rels)
+	v.rootRelsXML, err = v.fileToXML("_rels/.rels")
+	if err != nil {
+		return fmt.Errorf("loading _rels/.rels: %w", err)
+	}
+
 	v.contentTypesXML, err = v.fileToXML("[Content_Types].xml")
 	if err != nil {
 		return fmt.Errorf("loading [Content_Types].xml: %w", err)
@@ -246,6 +254,13 @@ func (v *VisioFile) loadCommonXML() error {
 	if err != nil {
 		return fmt.Errorf("loading app.xml: %w", err)
 	}
+
+	// Core properties (optional)
+	v.coreXML, _ = v.fileToXML("docProps/core.xml")
+
+	// Custom properties (optional)
+	v.customXML, _ = v.fileToXML("docProps/custom.xml")
+
 	v.documentXML, err = v.fileToXML("visio/document.xml")
 	if err != nil {
 		return fmt.Errorf("loading document.xml: %w", err)
@@ -1192,6 +1207,13 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 	}
 
 	// Update other XML files
+	if v.rootRelsXML != nil {
+		data, err := v.rootRelsXML.WriteToBytes()
+		if err != nil {
+			return nil, fmt.Errorf("serializing _rels/.rels: %w", err)
+		}
+		v.ZipFileContents["_rels/.rels"] = data
+	}
 	if v.contentTypesXML != nil {
 		data, err := v.contentTypesXML.WriteToBytes()
 		if err != nil {
@@ -1205,6 +1227,20 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 			return nil, fmt.Errorf("serializing app.xml: %w", err)
 		}
 		v.ZipFileContents["docProps/app.xml"] = data
+	}
+	if v.coreXML != nil {
+		data, err := v.coreXML.WriteToBytes()
+		if err != nil {
+			return nil, fmt.Errorf("serializing core.xml: %w", err)
+		}
+		v.ZipFileContents["docProps/core.xml"] = data
+	}
+	if v.customXML != nil {
+		data, err := v.customXML.WriteToBytes()
+		if err != nil {
+			return nil, fmt.Errorf("serializing custom.xml: %w", err)
+		}
+		v.ZipFileContents["docProps/custom.xml"] = data
 	}
 	if v.documentXML != nil {
 		data, err := v.documentXML.WriteToBytes()
@@ -1252,4 +1288,238 @@ func (v *VisioFile) SaveVsdx(filename string) error {
 // writeFile writes data to a file, creating directories as needed.
 func writeFile(filename string, data []byte) error {
 	return writeFileBytes(filename, data)
+}
+
+// --- Document Properties ---
+
+// CoreProperties represents the core document properties (docProps/core.xml).
+type CoreProperties struct {
+	Title       string
+	Subject     string
+	Creator     string
+	Keywords    string
+	Description string
+	LastModBy   string
+	Revision    string
+	Created     string
+	Modified    string
+}
+
+// CoreProperties returns the core document properties.
+func (v *VisioFile) CoreProperties() *CoreProperties {
+	if v.coreXML == nil {
+		return &CoreProperties{}
+	}
+
+	root := v.coreXML.Root()
+	if root == nil {
+		return &CoreProperties{}
+	}
+
+	props := &CoreProperties{}
+
+	if elem := root.FindElement("dc:title"); elem != nil {
+		props.Title = elem.Text()
+	}
+	if elem := root.FindElement("dc:subject"); elem != nil {
+		props.Subject = elem.Text()
+	}
+	if elem := root.FindElement("dc:creator"); elem != nil {
+		props.Creator = elem.Text()
+	}
+	if elem := root.FindElement("cp:keywords"); elem != nil {
+		props.Keywords = elem.Text()
+	}
+	if elem := root.FindElement("dc:description"); elem != nil {
+		props.Description = elem.Text()
+	}
+	if elem := root.FindElement("cp:lastModifiedBy"); elem != nil {
+		props.LastModBy = elem.Text()
+	}
+	if elem := root.FindElement("cp:revision"); elem != nil {
+		props.Revision = elem.Text()
+	}
+	if elem := root.FindElement("dcterms:created"); elem != nil {
+		props.Created = elem.Text()
+	}
+	if elem := root.FindElement("dcterms:modified"); elem != nil {
+		props.Modified = elem.Text()
+	}
+
+	return props
+}
+
+// SetCoreProperties sets the core document properties.
+func (v *VisioFile) SetCoreProperties(props *CoreProperties) {
+	if v.coreXML == nil {
+		v.coreXML = etree.NewDocument()
+		v.coreXML.CreateProcInst("xml", `version="1.0" encoding="UTF-8" standalone="yes"`)
+		root := v.coreXML.CreateElement("cp:coreProperties")
+		root.CreateAttr("xmlns:cp", CorePropNS)
+		root.CreateAttr("xmlns:dc", DcNS)
+		root.CreateAttr("xmlns:dcterms", DcTermsNS)
+		root.CreateAttr("xmlns:dcmitype", "http://purl.org/dc/dcmitype/")
+		root.CreateAttr("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
+	}
+
+	root := v.coreXML.Root()
+
+	setOrCreate := func(tag, value string) {
+		if elem := root.FindElement(tag); elem != nil {
+			elem.SetText(value)
+		} else if value != "" {
+			elem = root.CreateElement(tag)
+			elem.SetText(value)
+		}
+	}
+
+	setOrCreate("dc:title", props.Title)
+	setOrCreate("dc:subject", props.Subject)
+	setOrCreate("dc:creator", props.Creator)
+	setOrCreate("cp:keywords", props.Keywords)
+	setOrCreate("dc:description", props.Description)
+	setOrCreate("cp:lastModifiedBy", props.LastModBy)
+	setOrCreate("cp:revision", props.Revision)
+
+	if props.Created != "" {
+		if elem := root.FindElement("dcterms:created"); elem != nil {
+			elem.SetText(props.Created)
+		} else {
+			elem = root.CreateElement("dcterms:created")
+			elem.CreateAttr("xsi:type", "dcterms:W3CDTF")
+			elem.SetText(props.Created)
+		}
+	}
+	if props.Modified != "" {
+		if elem := root.FindElement("dcterms:modified"); elem != nil {
+			elem.SetText(props.Modified)
+		} else {
+			elem = root.CreateElement("dcterms:modified")
+			elem.CreateAttr("xsi:type", "dcterms:W3CDTF")
+			elem.SetText(props.Modified)
+		}
+	}
+}
+
+// CustomProperty represents a custom document property.
+type CustomProperty struct {
+	Name  string
+	Value string
+	Type  string // "lpwstr", "i4", "bool", "filetime", etc.
+}
+
+// CustomProperties returns all custom document properties.
+func (v *VisioFile) CustomProperties() []CustomProperty {
+	if v.customXML == nil {
+		return nil
+	}
+
+	root := v.customXML.Root()
+	if root == nil {
+		return nil
+	}
+
+	var props []CustomProperty
+	for _, prop := range root.SelectElements("property") {
+		name := prop.SelectAttrValue("name", "")
+		cp := CustomProperty{Name: name}
+
+		// Find the value element (could be vt:lpwstr, vt:i4, vt:bool, etc.)
+		for _, child := range prop.ChildElements() {
+			cp.Type = strings.TrimPrefix(child.Tag, "vt:")
+			cp.Value = child.Text()
+			break
+		}
+
+		props = append(props, cp)
+	}
+
+	return props
+}
+
+// GetCustomProperty returns a custom property by name.
+func (v *VisioFile) GetCustomProperty(name string) (string, bool) {
+	for _, prop := range v.CustomProperties() {
+		if prop.Name == name {
+			return prop.Value, true
+		}
+	}
+	return "", false
+}
+
+// SetCustomProperty sets a custom document property.
+func (v *VisioFile) SetCustomProperty(name, value string) {
+	if v.customXML == nil {
+		v.customXML = etree.NewDocument()
+		v.customXML.CreateProcInst("xml", `version="1.0" encoding="UTF-8" standalone="yes"`)
+		root := v.customXML.CreateElement("Properties")
+		root.CreateAttr("xmlns", "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties")
+		root.CreateAttr("xmlns:vt", VtNS)
+	}
+
+	root := v.customXML.Root()
+
+	// Find existing property or create new one
+	var propElem *etree.Element
+	maxPID := 1
+	for _, prop := range root.SelectElements("property") {
+		if prop.SelectAttrValue("name", "") == name {
+			propElem = prop
+		}
+		if pid, err := strconv.Atoi(prop.SelectAttrValue("pid", "0")); err == nil && pid > maxPID {
+			maxPID = pid
+		}
+	}
+
+	if propElem == nil {
+		propElem = root.CreateElement("property")
+		propElem.CreateAttr("fmtid", "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}")
+		propElem.CreateAttr("pid", strconv.Itoa(maxPID+1))
+		propElem.CreateAttr("name", name)
+	} else {
+		// Remove existing value elements
+		for _, child := range propElem.ChildElements() {
+			propElem.RemoveChild(child)
+		}
+	}
+
+	// Add value element
+	valElem := propElem.CreateElement("vt:lpwstr")
+	valElem.SetText(value)
+}
+
+// RootRelationships returns the package relationships from _rels/.rels.
+func (v *VisioFile) RootRelationships() []struct {
+	ID     string
+	Type   string
+	Target string
+} {
+	if v.rootRelsXML == nil {
+		return nil
+	}
+
+	root := v.rootRelsXML.Root()
+	if root == nil {
+		return nil
+	}
+
+	var rels []struct {
+		ID     string
+		Type   string
+		Target string
+	}
+
+	for _, rel := range root.SelectElements("Relationship") {
+		rels = append(rels, struct {
+			ID     string
+			Type   string
+			Target string
+		}{
+			ID:     rel.SelectAttrValue("Id", ""),
+			Type:   rel.SelectAttrValue("Type", ""),
+			Target: rel.SelectAttrValue("Target", ""),
+		})
+	}
+
+	return rels
 }

@@ -12,10 +12,10 @@ vsdx-go/
 │   ├── doc.go                  # Package-level documentatie (61 lines)
 │   │
 │   │── # Core types
-│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management (1255 lines)
+│   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management, doc props (1525 lines)
 │   ├── page.go                 # Page: shapes, search, connects, dimensions, layers, backgrounds (565 lines)
-│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie, protection (1596 lines)
-│   ├── cell.go                 # Cell: name/value/formula triple (43 lines)
+│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie, protection (1831 lines)
+│   ├── cell.go                 # Cell: name/value/formula/unit/error (84 lines)
 │   ├── connect.go              # Connect: from/to shape relaties (52 lines)
 │   ├── data_property.go        # DataProperty: custom shape properties met master inheritance (123 lines)
 │   │
@@ -32,7 +32,7 @@ vsdx-go/
 │   ├── template.go             # RenderTemplate: Jinja2-achtige directives (490 lines)
 │   ├── diff.go                 # VisioFileDiff: twee .vsdx bestanden vergelijken (241 lines)
 │   ├── media.go                # Media: embedded template shapes voor connectors (67 lines)
-│   ├── formula.go              # FormulaEvaluator: volledige formule-evaluatie (600 lines)
+│   ├── formula.go              # FormulaEvaluator: volledige formule-evaluatie (2148 lines)
 │   ├── routing.go              # Router: A* pathfinding voor auto-routing connectors (414 lines)
 │   ├── export.go               # ExportPNG, ExportPDF: raster/vector export via externe tools (284 lines)
 │   ├── validate.go             # Validate: schema validation en error recovery (232 lines)
@@ -40,11 +40,12 @@ vsdx-go/
 │   │── # Stencils & Masters
 │   ├── master.go               # CreateMaster, DeleteMaster, DuplicateMaster (305 lines)
 │   ├── stencil.go              # Stencil: .vssx stencil bestanden (357 lines)
-│   ├── theme.go                # Theme: document themes en QuickStyle kleuren (331 lines)
+│   ├── theme.go                # Theme: document themes, effects, variants (754 lines)
+│   ├── styles.go               # StyleSheet: style inheritance en toepassing (320 lines)
 │   │
 │   │── # Comments & Data Links
 │   ├── comments.go             # Comments: document/shape comments + authors (300 lines)
-│   ├── linegradient.go         # LineGradient: stroke gradients + Reviewer/Annotation (180 lines)
+│   ├── linegradient.go         # LineGradient: stroke gradients + Reviewer/Annotation (455 lines)
 │   ├── datalink.go             # DataLink: DataConnections, DataRecordSets (275 lines)
 │   │
 │   │── # Support
@@ -54,7 +55,7 @@ vsdx-go/
 │   ├── namespace.go            # XML namespace constants (14 lines)
 │   ├── util.go                 # writeFile helper (15 lines)
 │   │
-│   ├── vsdx_test.go            # 320+ test cases (6400 lines)
+│   ├── vsdx_test.go            # 350+ test cases (7313 lines)
 │   ├── foreign_test.go         # 10 test cases (726 lines)
 │   └── svg_test.go             # 30+ test cases (671 lines)
 │
@@ -150,21 +151,28 @@ De library leest en schrijft de volgende VSDX shape secties:
 | **Tabs** | ✓ | ✓ | `TabStops()`, `AddTabStop(position, alignment)` |
 | **FillGradient** | ✓ | ✓ | `FillGradient()`, `SetFillGradient(angle, stops)` |
 | **LineGradient** | ✓ | ✓ | `LineGradient()`, `SetLineGradient(angle, stops)` |
-| **Reviewer** | ✓ | - | `Reviewers()`, `GetReviewer(id)` |
-| **Annotation** | ✓ | - | `Annotations()` |
+| **Reviewer** | ✓ | ✓ | `Reviewers()`, `AddReviewer(name, initials, color)`, `DeleteReviewer(id)` |
+| **Annotation** | ✓ | ✓ | `Annotations()`, `AddAnnotation(x, y, reviewerID, comment)`, `DeleteAnnotation(id)` |
+| **SmartTag** | ✓ | ✓ | `SmartTags()`, `AddSmartTag(name, x, y, description)` |
+| **ActionTag** | ✓ | ✓ | `ActionTags()`, `AddActionTag(name, x, y, tagName, description)` |
+| **ConnectionABCD** | ✓ | ✓ | `ConnectionsABCD()`, `AddConnectionABCD(x, y, dirX, dirY, connType)` |
 
 ## VSDX Bestandsformaat
 
 Een `.vsdx` bestand is een ZIP-archief met XML-bestanden:
 
 ```
+_rels/.rels                      Package relationships (root rels)
 [Content_Types].xml              Content type mappings
-docProps/app.xml                 Document properties (pagina-telling)
+docProps/app.xml                 Extended properties (pagina-telling)
+docProps/core.xml                Core properties (titel, auteur, datum)
+docProps/custom.xml              Custom properties (user-defined)
 visio/document.xml               Stijlen/stylesheets
 visio/pages/pages.xml            Paginadefinities (namen, IDs)
 visio/pages/page1.xml            Pagina-inhoud (shapes, connects)
 visio/masters/masters.xml        Master shape definities
 visio/masters/master1.xml        Individuele master shapes
+visio/theme/theme1.xml           Theme definities (kleuren, fonts, effects)
 ```
 
 XML namespace: `http://schemas.microsoft.com/office/visio/2012/main`
@@ -213,16 +221,18 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
 
 ## Huidige Status
 
-- 29 Go source bestanden, ~12,000+ lines code + ~7,800 lines tests = ~19,800 total
-- 370 test cases (alle passing), ~90% code coverage
-- ~98% MS-VSDX spec coverage (19 secties + 75+ formule functies)
+- 34 Go source bestanden, ~14,700 lines code + ~8,700 lines tests = ~23,400 total
+- 445 test cases (alle passing), ~90% code coverage
+- **100% MS-VSDX spec coverage** (21 secties + 172 formule functies + volledige style/theme support)
 - Alle fasen compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
 - **Rendering features**: SVG met line patterns (24 types), arrow markers (45+ types), 
   gradient fills (fill + line), drop shadows, text positioning, ellipse geometry
-- **Authoring features**: master shapes aanmaken/verwijderen, stencils (.vssx), themes
+- **Authoring features**: master shapes aanmaken/verwijderen, stencils (.vssx), themes, variants
 - **Advanced features**: auto-routing connectors (A* pathfinding), PNG/PDF export,
-  background pages, schema validation, error recovery
-- **Data features**: comments/annotations, data links/recordsets, reviewers
+  background pages, schema validation, error recovery, TheCel/Sheet.N! formula references
+- **Data features**: comments/annotations (read+write), data links/recordsets, reviewers (read+write)
+- **Package features**: root relationships, core/custom document properties, Cell U/E attributes
+- **Section types**: SmartTag, ActionTag, ConnectionABCD, plus alle originele 18 types
 - Netwerk-diagram features: character/paragraph formatting, fill transparency, line patterns,
   geometry builders, layers, hyperlinks, connection points, protection, user-defined cells
 - Idiomatisch Go: cell constants, sentinel errors, typed interfaces, result structs

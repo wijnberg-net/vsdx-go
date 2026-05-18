@@ -1544,6 +1544,241 @@ func (s *Shape) RelativeBoundsRect() Rect {
 	return Rect{X: bx, Y: by, Width: ex - bx, Height: ey - by}
 }
 
+// --- SmartTag Section ---
+
+// SmartTag represents a smart tag (action button) on a shape.
+type SmartTag struct {
+	Name        string
+	X           float64
+	Y           float64
+	XJustify    int
+	YJustify    int
+	DisplayMode int
+	ButtonFace  string
+	Description string
+	Disabled    bool
+}
+
+// SmartTags returns all smart tags from this shape.
+func (s *Shape) SmartTags() []SmartTag {
+	section := s.xml.FindElement("Section[@N='SmartTag']")
+	if section == nil {
+		return nil
+	}
+	var result []SmartTag
+	for _, row := range section.SelectElements("Row") {
+		st := SmartTag{Name: row.SelectAttrValue("N", "")}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "X":
+				st.X, _ = strconv.ParseFloat(val, 64)
+			case "Y":
+				st.Y, _ = strconv.ParseFloat(val, 64)
+			case "XJustify":
+				st.XJustify, _ = strconv.Atoi(val)
+			case "YJustify":
+				st.YJustify, _ = strconv.Atoi(val)
+			case "DisplayMode":
+				st.DisplayMode, _ = strconv.Atoi(val)
+			case "ButtonFace":
+				st.ButtonFace = val
+			case "Description":
+				st.Description = val
+			case "Disabled":
+				st.Disabled = val == "1"
+			}
+		}
+		result = append(result, st)
+	}
+	return result
+}
+
+// AddSmartTag adds a smart tag to the shape at the given position.
+func (s *Shape) AddSmartTag(name string, x, y float64, description string) {
+	section := s.xml.FindElement("Section[@N='SmartTag']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "SmartTag")
+	}
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("N", name)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "XJustify", "1", "")
+	addCellXML(row, "YJustify", "1", "")
+	addCellXML(row, "DisplayMode", "0", "")
+	addCellXML(row, "Description", description, "")
+	addCellXML(row, "Disabled", "0", "")
+}
+
+// --- ActionTag Section ---
+
+// ActionTag represents an action tag on a shape (similar to SmartTag but with action).
+type ActionTag struct {
+	Name        string
+	X           float64
+	Y           float64
+	TagName     string
+	XJustify    int
+	YJustify    int
+	DisplayMode int
+	ButtonFace  string
+	Description string
+	Disabled    bool
+}
+
+// ActionTags returns all action tags from this shape.
+func (s *Shape) ActionTags() []ActionTag {
+	section := s.xml.FindElement("Section[@N='ActionTag']")
+	if section == nil {
+		return nil
+	}
+	var result []ActionTag
+	for _, row := range section.SelectElements("Row") {
+		at := ActionTag{Name: row.SelectAttrValue("N", "")}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "X":
+				at.X, _ = strconv.ParseFloat(val, 64)
+			case "Y":
+				at.Y, _ = strconv.ParseFloat(val, 64)
+			case "TagName":
+				at.TagName = val
+			case "XJustify":
+				at.XJustify, _ = strconv.Atoi(val)
+			case "YJustify":
+				at.YJustify, _ = strconv.Atoi(val)
+			case "DisplayMode":
+				at.DisplayMode, _ = strconv.Atoi(val)
+			case "ButtonFace":
+				at.ButtonFace = val
+			case "Description":
+				at.Description = val
+			case "Disabled":
+				at.Disabled = val == "1"
+			}
+		}
+		result = append(result, at)
+	}
+	return result
+}
+
+// AddActionTag adds an action tag to the shape.
+func (s *Shape) AddActionTag(name string, x, y float64, tagName, description string) {
+	section := s.xml.FindElement("Section[@N='ActionTag']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "ActionTag")
+	}
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("N", name)
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "TagName", tagName, "")
+	addCellXML(row, "XJustify", "1", "")
+	addCellXML(row, "YJustify", "1", "")
+	addCellXML(row, "DisplayMode", "0", "")
+	addCellXML(row, "Description", description, "")
+	addCellXML(row, "Disabled", "0", "")
+}
+
+// --- ConnectionABCD Section ---
+
+// ConnectionABCD represents an extended connection point with directional info.
+type ConnectionABCD struct {
+	Row  int
+	X    float64
+	Y    float64
+	A    float64 // Direction X
+	B    float64 // Direction Y
+	C    int     // Connection type
+	D    int     // AutoGen flag
+	DirX float64
+	DirY float64
+	Type int
+}
+
+// ConnectionsABCD returns extended connection points with directional information.
+func (s *Shape) ConnectionsABCD() []ConnectionABCD {
+	section := s.xml.FindElement("Section[@N='ConnectionABCD']")
+	if section == nil {
+		// Fall back to regular Connection section
+		section = s.xml.FindElement("Section[@N='Connection']")
+	}
+	if section == nil {
+		return nil
+	}
+
+	var result []ConnectionABCD
+	for _, row := range section.SelectElements("Row") {
+		ix, _ := strconv.Atoi(row.SelectAttrValue("IX", "0"))
+		cp := ConnectionABCD{Row: ix}
+		for _, cell := range row.SelectElements("Cell") {
+			name := cell.SelectAttrValue("N", "")
+			val := cell.SelectAttrValue("V", "")
+			switch name {
+			case "X":
+				cp.X, _ = strconv.ParseFloat(val, 64)
+			case "Y":
+				cp.Y, _ = strconv.ParseFloat(val, 64)
+			case "A":
+				cp.A, _ = strconv.ParseFloat(val, 64)
+			case "B":
+				cp.B, _ = strconv.ParseFloat(val, 64)
+			case "C":
+				cp.C, _ = strconv.Atoi(val)
+			case "D":
+				cp.D, _ = strconv.Atoi(val)
+			case "DirX":
+				cp.DirX, _ = strconv.ParseFloat(val, 64)
+			case "DirY":
+				cp.DirY, _ = strconv.ParseFloat(val, 64)
+			case "Type":
+				cp.Type, _ = strconv.Atoi(val)
+			}
+		}
+		result = append(result, cp)
+	}
+	return result
+}
+
+// AddConnectionABCD adds an extended connection point with direction.
+func (s *Shape) AddConnectionABCD(x, y, dirX, dirY float64, connType int) int {
+	section := s.xml.FindElement("Section[@N='ConnectionABCD']")
+	if section == nil {
+		section = s.xml.CreateElement("Section")
+		section.CreateAttr("N", "ConnectionABCD")
+	}
+
+	maxIX := -1
+	for _, row := range section.SelectElements("Row") {
+		if ix, err := strconv.Atoi(row.SelectAttrValue("IX", "")); err == nil && ix > maxIX {
+			maxIX = ix
+		}
+	}
+	ix := maxIX + 1
+
+	row := section.CreateElement("Row")
+	row.CreateAttr("IX", strconv.Itoa(ix))
+	addCellXML(row, "X", fmtFloat(x), "")
+	addCellXML(row, "Y", fmtFloat(y), "")
+	addCellXML(row, "DirX", fmtFloat(dirX), "")
+	addCellXML(row, "DirY", fmtFloat(dirY), "")
+	addCellXML(row, "Type", strconv.Itoa(connType), "")
+	addCellXML(row, "A", "0", "")
+	addCellXML(row, "B", "0", "")
+	addCellXML(row, "C", "0", "")
+	addCellXML(row, "D", "0", "")
+
+	return ix
+}
+
 // --- Connects ---
 
 // Connects returns all Connect objects related to this shape.

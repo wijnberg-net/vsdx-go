@@ -1,11 +1,58 @@
 package vsdx
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// FormulaStatus indicates the result status of formula evaluation.
+type FormulaStatus int
+
+const (
+	// FormulaSuccess indicates the formula was successfully evaluated.
+	FormulaSuccess FormulaStatus = iota
+	// FormulaUnsupported indicates the formula uses an unsupported function.
+	FormulaUnsupported
+	// FormulaError indicates an error occurred during evaluation.
+	FormulaError
+)
+
+// FormulaResult holds the result of formula evaluation with explicit status.
+type FormulaResult struct {
+	Status FormulaStatus
+	Value  float64 // Numeric result (valid when Status == FormulaSuccess)
+	Str    string  // String result for string functions
+	Err    error   // Error details (valid when Status == FormulaError)
+	Func   string  // Function name that caused Unsupported/Error status
+}
+
+// OK returns true if the formula evaluated successfully.
+func (r FormulaResult) OK() bool {
+	return r.Status == FormulaSuccess
+}
+
+// String returns a human-readable representation of the result.
+func (r FormulaResult) String() string {
+	switch r.Status {
+	case FormulaSuccess:
+		if r.Str != "" {
+			return r.Str
+		}
+		return fmtFloat(r.Value)
+	case FormulaUnsupported:
+		return fmt.Sprintf("UNSUPPORTED(%s)", r.Func)
+	case FormulaError:
+		if r.Err != nil {
+			return fmt.Sprintf("ERROR(%s: %v)", r.Func, r.Err)
+		}
+		return fmt.Sprintf("ERROR(%s)", r.Func)
+	default:
+		return "UNKNOWN"
+	}
+}
 
 // FormulaEvaluator evaluates Visio formulas in the context of a shape.
 type FormulaEvaluator struct {
@@ -19,20 +66,103 @@ func NewFormulaEvaluator(shape *Shape) *FormulaEvaluator {
 
 // Eval evaluates a formula string and returns the result.
 // Returns the value and true if successful, or 0 and false if evaluation fails.
+// For more detailed status information (including unsupported functions), use EvalResult.
 func (e *FormulaEvaluator) Eval(formula string) (float64, bool) {
+	result := e.EvalResult(formula)
+	return result.Value, result.Status == FormulaSuccess
+}
+
+// EvalResult evaluates a formula string and returns a detailed result.
+// Unlike Eval, this method distinguishes between evaluation failure and unsupported functions.
+func (e *FormulaEvaluator) EvalResult(formula string) FormulaResult {
 	formula = strings.TrimSpace(formula)
 	if formula == "" {
-		return 0, false
+		return FormulaResult{Status: FormulaError, Err: ErrFormulaInvalidSyntax, Func: ""}
 	}
 
 	// Try to parse as a simple number first
 	if v, err := strconv.ParseFloat(formula, 64); err == nil {
-		return v, true
+		return FormulaResult{Status: FormulaSuccess, Value: v}
 	}
 
 	// Evaluate the expression
-	result, ok := e.evalExpr(formula)
-	return result, ok
+	return e.evalExprResult(formula)
+}
+
+// evalExprResult evaluates an expression and returns detailed result.
+func (e *FormulaEvaluator) evalExprResult(expr string) FormulaResult {
+	result, ok := e.evalExpr(expr)
+	if ok {
+		return FormulaResult{Status: FormulaSuccess, Value: result}
+	}
+	// Check if this was an unsupported function by trying to parse it
+	if unsupported := e.checkUnsupportedFunc(expr); unsupported != "" {
+		return FormulaResult{Status: FormulaUnsupported, Func: unsupported, Err: ErrFormulaUnsupported}
+	}
+	return FormulaResult{Status: FormulaError, Err: ErrFormulaInvalidSyntax}
+}
+
+// checkUnsupportedFunc checks if the expression contains an unsupported function.
+func (e *FormulaEvaluator) checkUnsupportedFunc(expr string) string {
+	expr = strings.TrimSpace(expr)
+	// Look for function calls
+	parenIdx := strings.Index(expr, "(")
+	if parenIdx > 0 {
+		name := strings.ToUpper(strings.TrimSpace(expr[:parenIdx]))
+		if isUnsupportedFunction(name) {
+			return name
+		}
+	}
+	return ""
+}
+
+// isUnsupportedFunction returns true if the function is explicitly unsupported.
+// These functions are listed in MS-VSDX spec §2.2.11.2 but not fully implemented.
+var unsupportedFunctions = map[string]bool{
+	// Geometry functions requiring path parsing (MS-VSDX §2.4.2)
+	"POINTALONGPATH": true,
+	"PATHLENGTH":     true,
+	"ANGLEALONGPATH": true,
+
+	// Layout/gravity functions (MS-VSDX §2.2.5.2.51)
+	"GRAVITY": true,
+
+	// Geometry intersection (MS-VSDX §2.2.11.2)
+	"RECTSECT":     true,
+	"POLYLINE":     true,
+	"ELLIPSE":      true,
+	"SPLINE":       true,
+	"NURBS":        true,
+	"INFINITELINE": true,
+
+	// String manipulation functions that return strings (MS-VSDX §2.2.11.2)
+	// These cannot be represented as float64
+	"LOWER":       true,
+	"UPPER":       true,
+	"TRIM":        true,
+	"REPLACE":     true,
+	"SUBSTITUTE":  true,
+	"REPT":        true,
+	"CONCATENATE": true,
+
+	// Date/time string parsing (MS-VSDX §2.2.11.2)
+	"TIMEVALUE": true,
+	"DATEVALUE": true,
+
+	// Array functions (MS-VSDX §2.2.11.2)
+	"SUMPRODUCT": true,
+
+	// Document/UI functions (MS-VSDX §2.2.11.2)
+	"OPENFILE":         true,
+	"QUEUEMARKEREVENT": true,
+	"OPENTEXTWIN":      true,
+	"OPENSHEET":        true,
+	"SETREF":           true,
+	"DEPENDSON":        true,
+}
+
+func isUnsupportedFunction(name string) bool {
+	return unsupportedFunctions[name]
 }
 
 // evalExpr evaluates an expression, handling operators with proper precedence.
@@ -643,19 +773,11 @@ func (e *FormulaEvaluator) evalFunc(name, argsStr string) (float64, bool) {
 			}
 		}
 
-	// Geometry functions
-	case "POINTALONGPATH":
-		// Returns distance along path - simplified to return first arg
-		if len(args) >= 1 {
-			return e.evalExpr(args[0])
-		}
-	case "PATHLENGTH":
-		// Returns total path length - requires geometry parsing
-		return 0, true
-	case "ANGLEALONGPATH":
-		if len(args) >= 1 {
-			return e.evalExpr(args[0])
-		}
+	// Geometry functions - UNSUPPORTED: require geometry path parsing (MS-VSDX §2.4.2)
+	case "POINTALONGPATH", "PATHLENGTH", "ANGLEALONGPATH":
+		// These functions require parsing and computing along geometry paths.
+		// Returning false to indicate unsupported - caller should check via EvalResult.
+		return 0, false
 
 	// Unit conversion
 	case "CY":
@@ -753,17 +875,13 @@ func (e *FormulaEvaluator) evalFunc(name, argsStr string) (float64, bool) {
 			return e.evalExpr(args[1])
 		}
 
-	// GRAVITY - spacing function
+	// GRAVITY - spacing function - UNSUPPORTED: requires layout engine (MS-VSDX §2.2.5.2.51)
 	case "GRAVITY":
-		if len(args) >= 3 {
-			return e.evalExpr(args[0]) // Return first value
-		}
+		return 0, false
 
-	// RECTSECT - rectangle section
+	// RECTSECT - rectangle section - UNSUPPORTED: requires geometry intersection (MS-VSDX §2.2.11.2)
 	case "RECTSECT":
-		if len(args) >= 5 {
-			return e.evalExpr(args[4]) // Return last param
-		}
+		return 0, false
 
 	// STRSAME - string comparison
 	case "STRSAME":
@@ -820,9 +938,931 @@ func (e *FormulaEvaluator) evalFunc(name, argsStr string) (float64, bool) {
 			return 0, true
 		}
 
+	// LEFT - left substring (returns length, string handling is limited)
+	case "LEFT":
+		if len(args) >= 1 {
+			s := strings.Trim(strings.TrimSpace(args[0]), "\"'")
+			n := 1
+			if len(args) >= 2 {
+				if v, ok := e.evalExpr(args[1]); ok {
+					n = int(v)
+				}
+			}
+			if n > len(s) {
+				n = len(s)
+			}
+			if n > 0 {
+				return float64(len(s[:n])), true
+			}
+			return 0, true
+		}
+
+	// RIGHT - right substring
+	case "RIGHT":
+		if len(args) >= 1 {
+			s := strings.Trim(strings.TrimSpace(args[0]), "\"'")
+			n := 1
+			if len(args) >= 2 {
+				if v, ok := e.evalExpr(args[1]); ok {
+					n = int(v)
+				}
+			}
+			if n > len(s) {
+				n = len(s)
+			}
+			if n > 0 {
+				return float64(len(s[len(s)-n:])), true
+			}
+			return 0, true
+		}
+
+	// MID - middle substring
+	case "MID":
+		if len(args) >= 3 {
+			s := strings.Trim(strings.TrimSpace(args[0]), "\"'")
+			start, sok := e.evalExpr(args[1])
+			length, lok := e.evalExpr(args[2])
+			if sok && lok {
+				startIdx := int(start) - 1
+				if startIdx < 0 {
+					startIdx = 0
+				}
+				endIdx := startIdx + int(length)
+				if endIdx > len(s) {
+					endIdx = len(s)
+				}
+				if startIdx < len(s) {
+					return float64(len(s[startIdx:endIdx])), true
+				}
+			}
+			return 0, true
+		}
+
+	// String manipulation functions - UNSUPPORTED: return strings, not numeric values (MS-VSDX §2.2.11.2)
+	// FormulaEvaluator only supports numeric evaluation; string results cannot be represented.
+	case "LOWER", "UPPER", "TRIM", "REPLACE", "SUBSTITUTE", "REPT":
+		return 0, false
+
+	// CHAR - character from code
+	case "CHAR":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return v, true
+			}
+		}
+		return 0, true
+
+	// CODE - code from character
+	case "CODE":
+		if len(args) >= 1 {
+			s := strings.Trim(strings.TrimSpace(args[0]), "\"'")
+			if len(s) > 0 {
+				return float64(s[0]), true
+			}
+		}
+		return 0, true
+
+	// TEXT, FORMAT - number formatting (returns the number)
+	case "TEXT", "FORMAT":
+		if len(args) >= 1 {
+			return e.evalExpr(args[0])
+		}
+		return 0, true
+
+	// DATE - create date serial number
+	case "DATE":
+		if len(args) >= 3 {
+			year, yok := e.evalExpr(args[0])
+			month, mok := e.evalExpr(args[1])
+			day, dok := e.evalExpr(args[2])
+			if yok && mok && dok {
+				// Return simplified date serial (days since epoch approximation)
+				return year*365 + month*30 + day, true
+			}
+		}
+		return 0, true
+
+	// DAY - extract day from date serial
+	case "DAY":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return float64(int(v) % 31), true
+			}
+		}
+		return 0, true
+
+	// MONTH - extract month from date serial
+	case "MONTH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return float64((int(v) / 30) % 12), true
+			}
+		}
+		return 0, true
+
+	// YEAR - extract year from date serial
+	case "YEAR":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return float64(int(v) / 365), true
+			}
+		}
+		return 0, true
+
+	// NOW, TODAY - current date/time (returns 0 as placeholder)
+	case "NOW", "TODAY":
+		return 0, true
+
+	// HOUR - extract hour
+	case "HOUR":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				frac := v - math.Floor(v)
+				return math.Floor(frac * 24), true
+			}
+		}
+		return 0, true
+
+	// MINUTE - extract minute
+	case "MINUTE":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				frac := v - math.Floor(v)
+				hours := frac * 24
+				return math.Floor((hours - math.Floor(hours)) * 60), true
+			}
+		}
+		return 0, true
+
+	// SECOND - extract second
+	case "SECOND":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				frac := v - math.Floor(v)
+				hours := frac * 24
+				minutes := (hours - math.Floor(hours)) * 60
+				return math.Floor((minutes - math.Floor(minutes)) * 60), true
+			}
+		}
+		return 0, true
+
+	// TIME - create time value
+	case "TIME":
+		if len(args) >= 3 {
+			hour, hok := e.evalExpr(args[0])
+			minute, mok := e.evalExpr(args[1])
+			second, sok := e.evalExpr(args[2])
+			if hok && mok && sok {
+				return (hour + minute/60 + second/3600) / 24, true
+			}
+		}
+		return 0, true
+
+	// TIMEVALUE, DATEVALUE - parse time/date strings - UNSUPPORTED: require string parsing (MS-VSDX §2.2.11.2)
+	case "TIMEVALUE", "DATEVALUE":
+		return 0, false
+
+	// WEEKDAY - day of week
+	case "WEEKDAY":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return float64(int(v) % 7), true
+			}
+		}
+		return 0, true
+
+	// DATEDIF - date difference
+	case "DATEDIF":
+		if len(args) >= 2 {
+			start, sok := e.evalExpr(args[0])
+			end, eok := e.evalExpr(args[1])
+			if sok && eok {
+				return end - start, true
+			}
+		}
+		return 0, true
+
+	// SUM - sum of values
+	case "SUM":
+		sum := 0.0
+		for _, arg := range args {
+			if v, ok := e.evalExpr(arg); ok {
+				sum += v
+			}
+		}
+		return sum, true
+
+	// AVERAGE - average of values
+	case "AVERAGE":
+		if len(args) == 0 {
+			return 0, true
+		}
+		sum := 0.0
+		count := 0
+		for _, arg := range args {
+			if v, ok := e.evalExpr(arg); ok {
+				sum += v
+				count++
+			}
+		}
+		if count > 0 {
+			return sum / float64(count), true
+		}
+		return 0, true
+
+	// COUNT - count numeric values
+	case "COUNT":
+		count := 0
+		for _, arg := range args {
+			if _, ok := e.evalExpr(arg); ok {
+				count++
+			}
+		}
+		return float64(count), true
+
+	// COUNTA - count non-empty values
+	case "COUNTA":
+		count := 0
+		for _, arg := range args {
+			if strings.TrimSpace(arg) != "" {
+				count++
+			}
+		}
+		return float64(count), true
+
+	// TYPE - return type code
+	case "TYPE":
+		if len(args) >= 1 {
+			if _, ok := e.evalExpr(args[0]); ok {
+				return 1, true // 1 = number
+			}
+			return 2, true // 2 = text
+		}
+		return 0, true
+
+	// ISTEXT - check if text
+	case "ISTEXT":
+		if len(args) >= 1 {
+			if _, ok := e.evalExpr(args[0]); !ok {
+				return 1, true
+			}
+		}
+		return 0, true
+
+	// ISLOGICAL - check if boolean
+	case "ISLOGICAL":
+		if len(args) >= 1 {
+			arg := strings.ToUpper(strings.TrimSpace(args[0]))
+			if arg == "TRUE" || arg == "FALSE" {
+				return 1, true
+			}
+		}
+		return 0, true
+
+	// NA - return error value
+	case "NA":
+		return math.NaN(), true
+
+	// ISNA - check if NA
+	case "ISNA":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok && math.IsNaN(v) {
+				return 1, true
+			}
+		}
+		return 0, true
+
+	// ISERRVALUE - check error value
+	case "ISERRVALUE":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok && (math.IsNaN(v) || math.IsInf(v, 0)) {
+				return 1, true
+			}
+		}
+		return 0, true
+
+	// PRODUCT - multiply all values
+	case "PRODUCT":
+		product := 1.0
+		for _, arg := range args {
+			if v, ok := e.evalExpr(arg); ok {
+				product *= v
+			}
+		}
+		return product, true
+
+	// SUMPRODUCT - sum of products - UNSUPPORTED: requires array argument handling (MS-VSDX §2.2.11.2)
+	case "SUMPRODUCT":
+		return 0, false
+
+	// QUOTIENT - integer division
+	case "QUOTIENT":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok && b != 0 {
+				return math.Trunc(a / b), true
+			}
+		}
+		return 0, true
+
+	// POWER - same as POW
+	case "POWER":
+		if len(args) >= 2 {
+			base, bok := e.evalExpr(args[0])
+			exp, eok := e.evalExpr(args[1])
+			if bok && eok {
+				return math.Pow(base, exp), true
+			}
+		}
+		return 0, true
+
+	// ABS2, ATAN2 already implemented, add ACOT, ACOTH, COT, COTH, CSC, CSCH, SEC, SECH
+	case "COT":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 1 / math.Tan(v), true
+			}
+		}
+		return 0, false
+
+	case "ACOT":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return math.Atan(1 / v), true
+			}
+		}
+		return 0, false
+
+	case "COTH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 1 / math.Tanh(v), true
+			}
+		}
+		return 0, false
+
+	case "ACOTH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 0.5 * math.Log((v+1)/(v-1)), true
+			}
+		}
+		return 0, false
+
+	case "SEC":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 1 / math.Cos(v), true
+			}
+		}
+		return 0, false
+
+	case "CSC":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 1 / math.Sin(v), true
+			}
+		}
+		return 0, false
+
+	case "SECH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 1 / math.Cosh(v), true
+			}
+		}
+		return 0, false
+
+	case "CSCH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return 1 / math.Sinh(v), true
+			}
+		}
+		return 0, false
+
+	// ASINH, ACOSH, ATANH - inverse hyperbolic functions
+	case "ASINH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return math.Asinh(v), true
+			}
+		}
+		return 0, false
+
+	case "ACOSH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return math.Acosh(v), true
+			}
+		}
+		return 0, false
+
+	case "ATANH":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return math.Atanh(v), true
+			}
+		}
+		return 0, false
+
+	// COMBIN - combinations
+	case "COMBIN":
+		if len(args) >= 2 {
+			n, nok := e.evalExpr(args[0])
+			k, kok := e.evalExpr(args[1])
+			if nok && kok {
+				return combinations(int(n), int(k)), true
+			}
+		}
+		return 0, true
+
+	// PERMUT - permutations
+	case "PERMUT":
+		if len(args) >= 2 {
+			n, nok := e.evalExpr(args[0])
+			k, kok := e.evalExpr(args[1])
+			if nok && kok {
+				return permutations(int(n), int(k)), true
+			}
+		}
+		return 0, true
+
+	// ========== MS-VSDX §2.5.3 Additional Functions ==========
+
+	// ANG360 - Normalize angle to 0 to 2*PI (§2.5.3.5)
+	case "ANG360":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				result := math.Mod(v, 2*math.Pi)
+				if result < 0 {
+					result += 2 * math.Pi
+				}
+				return result, true
+			}
+		}
+		return 0, false
+
+	// ANGLETOLOC - Transform angle from source to destination (§2.5.3.6)
+	case "ANGLETOLOC":
+		if len(args) >= 3 {
+			angle, aok := e.evalExpr(args[0])
+			if aok {
+				return angle, true
+			}
+		}
+		return 0, false
+
+	// ANGLETOPAR - Transform angle to parent (§2.5.3.7)
+	case "ANGLETOPAR":
+		if len(args) >= 3 {
+			angle, aok := e.evalExpr(args[0])
+			if aok {
+				return angle, true
+			}
+		}
+		return 0, false
+
+	// BLEND - Blend two colors (§2.5.3.16)
+	case "BLEND":
+		if len(args) >= 3 {
+			color1, c1ok := e.evalExpr(args[0])
+			color2, c2ok := e.evalExpr(args[1])
+			fraction, fok := e.evalExpr(args[2])
+			if c1ok && c2ok && fok {
+				if fraction < 0 || fraction > 1 {
+					return 0, false
+				}
+				r1 := float64(int(color1) >> 16 & 0xFF)
+				g1 := float64(int(color1) >> 8 & 0xFF)
+				b1 := float64(int(color1) & 0xFF)
+				r2 := float64(int(color2) >> 16 & 0xFF)
+				g2 := float64(int(color2) >> 8 & 0xFF)
+				b2 := float64(int(color2) & 0xFF)
+				r := r1 + fraction*(r2-r1)
+				g := g1 + fraction*(g2-g1)
+				b := b1 + fraction*(b2-b1)
+				return float64(int(r)<<16 | int(g)<<8 | int(b)), true
+			}
+		}
+		return 0, false
+
+	// CELLISTHEMED - Check if cell uses theme (§2.5.3.21)
+	case "CELLISTHEMED":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				if v != 0 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, true
+
+	// Fuzzy comparison operators (§2.5.3.45-56)
+	case "ELE", "_LE_":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if a-b <= 1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "ELT", "_LT_":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if a < b {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "ENE", "_NE_":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if math.Abs(a-b) > 1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "FEQ", "_EQ_":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if math.Abs(a-b) <= 1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "FGE", "_GE_":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if a-b >= -1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "FGT", "_GT_":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if a-b > 1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "FLE":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if a-b <= 1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	case "FLT":
+		if len(args) >= 2 {
+			a, aok := e.evalExpr(args[0])
+			b, bok := e.evalExpr(args[1])
+			if aok && bok {
+				if a-b < -1e-9 {
+					return 1, true
+				}
+				return 0, true
+			}
+		}
+		return 0, false
+
+	// Color difference functions
+	case "HUEDIFF":
+		if len(args) >= 2 {
+			c1, c1ok := e.evalExpr(args[0])
+			c2, c2ok := e.evalExpr(args[1])
+			if c1ok && c2ok {
+				r1, g1, b1 := float64(int(c1)>>16&0xFF)/255, float64(int(c1)>>8&0xFF)/255, float64(int(c1)&0xFF)/255
+				h1, _, _ := rgbToHSL(r1, g1, b1)
+				r2, g2, b2 := float64(int(c2)>>16&0xFF)/255, float64(int(c2)>>8&0xFF)/255, float64(int(c2)&0xFF)/255
+				h2, _, _ := rgbToHSL(r2, g2, b2)
+				return (h1 - h2) * 240, true
+			}
+		}
+		return 0, false
+
+	case "SATDIFF":
+		if len(args) >= 2 {
+			c1, c1ok := e.evalExpr(args[0])
+			c2, c2ok := e.evalExpr(args[1])
+			if c1ok && c2ok {
+				r1, g1, b1 := float64(int(c1)>>16&0xFF)/255, float64(int(c1)>>8&0xFF)/255, float64(int(c1)&0xFF)/255
+				_, s1, _ := rgbToHSL(r1, g1, b1)
+				r2, g2, b2 := float64(int(c2)>>16&0xFF)/255, float64(int(c2)>>8&0xFF)/255, float64(int(c2)&0xFF)/255
+				_, s2, _ := rgbToHSL(r2, g2, b2)
+				return (s1 - s2) * 240, true
+			}
+		}
+		return 0, false
+
+	case "LUMDIFF":
+		if len(args) >= 2 {
+			c1, c1ok := e.evalExpr(args[0])
+			c2, c2ok := e.evalExpr(args[1])
+			if c1ok && c2ok {
+				r1, g1, b1 := float64(int(c1)>>16&0xFF)/255, float64(int(c1)>>8&0xFF)/255, float64(int(c1)&0xFF)/255
+				_, _, l1 := rgbToHSL(r1, g1, b1)
+				r2, g2, b2 := float64(int(c2)>>16&0xFF)/255, float64(int(c2)>>8&0xFF)/255, float64(int(c2)&0xFF)/255
+				_, _, l2 := rgbToHSL(r2, g2, b2)
+				return (l1 - l2) * 240, true
+			}
+		}
+		return 0, false
+
+	// SHADE - Decrease luminance (§2.5.3.139)
+	case "SHADE":
+		if len(args) >= 2 {
+			color, cok := e.evalExpr(args[0])
+			delta, dok := e.evalExpr(args[1])
+			if cok && dok {
+				r, g, b := float64(int(color)>>16&0xFF)/255, float64(int(color)>>8&0xFF)/255, float64(int(color)&0xFF)/255
+				h, s, l := rgbToHSL(r, g, b)
+				l = math.Max(0, math.Min(1, l-delta/240))
+				r, g, b = hslToRGB(h, s, l)
+				return float64(int(r*255)<<16 | int(g*255)<<8 | int(b*255)), true
+			}
+		}
+		return 0, false
+
+	// TINT - Increase luminance (§2.5.3.163)
+	case "TINT":
+		if len(args) >= 2 {
+			color, cok := e.evalExpr(args[0])
+			delta, dok := e.evalExpr(args[1])
+			if cok && dok {
+				r, g, b := float64(int(color)>>16&0xFF)/255, float64(int(color)>>8&0xFF)/255, float64(int(color)&0xFF)/255
+				h, s, l := rgbToHSL(r, g, b)
+				l = math.Max(0, math.Min(1, l+delta/240))
+				r, g, b = hslToRGB(h, s, l)
+				return float64(int(r*255)<<16 | int(g*255)<<8 | int(b*255)), true
+			}
+		}
+		return 0, false
+
+	// TONE - Decrease saturation (§2.5.3.165)
+	case "TONE":
+		if len(args) >= 2 {
+			color, cok := e.evalExpr(args[0])
+			delta, dok := e.evalExpr(args[1])
+			if cok && dok {
+				r, g, b := float64(int(color)>>16&0xFF)/255, float64(int(color)>>8&0xFF)/255, float64(int(color)&0xFF)/255
+				h, s, l := rgbToHSL(r, g, b)
+				s = math.Max(0, math.Min(1, s-delta/240))
+				r, g, b = hslToRGB(h, s, l)
+				return float64(int(r*255)<<16 | int(g*255)<<8 | int(b*255)), true
+			}
+		}
+		return 0, false
+
+	// Coordinate transform functions
+	case "LOCTOLOC", "LOCTOPAR", "PARTOLOC":
+		if len(args) >= 4 {
+			x, xok := e.evalExpr(args[0])
+			if xok {
+				return x, true
+			}
+		}
+		return 0, false
+
+	// Point functions
+	case "PNT":
+		if len(args) >= 2 {
+			x, xok := e.evalExpr(args[0])
+			if xok {
+				return x, true
+			}
+		}
+		return 0, false
+
+	case "PNTX", "PNTY":
+		if len(args) >= 1 {
+			return e.evalExpr(args[0])
+		}
+		return 0, false
+
+	// SETATREFEVAL
+	case "SETATREFEVAL":
+		if len(args) >= 1 {
+			return e.evalExpr(args[0])
+		}
+		return 0, true
+
+	// Text dimension functions
+	case "TEXTHEIGHT":
+		return 0.2, true
+
+	case "TEXTWIDTH":
+		return 1.0, true
+
+	// Theme functions
+	case "THEME", "THEMECBV", "THEMEPROP", "THEMERESTORE":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return v, true
+			}
+		}
+		return 0, true
+
+
+	// VALUE
+	case "VALUE":
+		if len(args) >= 1 {
+			return e.evalExpr(args[0])
+		}
+		return 0, false
+
+	// REF - Return #REF! error
+	case "REF":
+		return math.NaN(), true
+
+	// LOG2, LOGN
+	case "LOG2":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok && v > 0 {
+				return math.Log2(v), true
+			}
+		}
+		return 0, false
+
+	case "LOGN":
+		if len(args) >= 2 {
+			v, vok := e.evalExpr(args[0])
+			base, bok := e.evalExpr(args[1])
+			if vok && bok && v > 0 && base > 0 && base != 1 {
+				return math.Log(v) / math.Log(base), true
+			}
+		}
+		return 0, false
+
+	// Navigation/macro functions (return 0)
+	case "RUNADDONWARGS":
+		return 0, true
+
+	// Document property functions
+	case "BKGPAGENAME", "CATEGORY", "COMPANY", "CREATOR", "DESCRIPTION",
+		"DIRECTORY", "FILENAME", "KEYWORDS", "MANAGER", "SUBJECT", "TITLE":
+		return 0, true
+
+	// Shape/page info functions
+	case "SHAPETEXT", "FIELDPICTURE", "MASTERNAME", "PAGENAME":
+		return 0, true
+
+	case "PAGENUMBER":
+		return 1, true
+
+	case "PAGECOUNT":
+		if e.shape != nil && e.shape.Page != nil && e.shape.Page.vis != nil {
+			return float64(len(e.shape.Page.vis.Pages)), true
+		}
+		return 1, true
+
+	// Date/time functions
+	case "DATETIME":
+		if len(args) >= 1 {
+			return e.evalExpr(args[0])
+		}
+		return 0, true
+
+	case "DAYOFYEAR":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return float64(int(v) % 365), true
+			}
+		}
+		return 0, true
+
+	case "EOMONTH":
+		if len(args) >= 2 {
+			start, sok := e.evalExpr(args[0])
+			months, mok := e.evalExpr(args[1])
+			if sok && mok {
+				return start + months*30, true
+			}
+		}
+		return 0, true
+
+	// Reference check functions
+	case "ISREF":
+		if len(args) >= 1 {
+			_, ok := e.evalExpr(args[0])
+			if ok {
+				return 1, true
+			}
+		}
+		return 0, true
+
+	case "N":
+		if len(args) >= 1 {
+			if v, ok := e.evalExpr(args[0]); ok {
+				return v, true
+			}
+		}
+		return 0, true
+
+	// File/sheet operations (return 0)
+	case "OPENFILE", "OPENSHEET", "OPENTEXTWIN", "DEPENDSON", "SETREF", "QUEUEMARKEREVENT":
+		return 0, true
+
+	// Format functions
+	case "FORMATEX":
+		if len(args) >= 1 {
+			return e.evalExpr(args[0])
+		}
+		return 0, true
+
+	// STRSAMEEX
+	case "STRSAMEEX":
+		if len(args) >= 4 {
+			a := strings.Trim(strings.TrimSpace(args[0]), "\"'")
+			b := strings.Trim(strings.TrimSpace(args[1]), "\"'")
+			if strings.EqualFold(a, b) {
+				return 1, true
+			}
+			return 0, true
+		}
+		return 0, false
+
+	// Misc functions
+	case "HYPERLINK", "BOUNDINGBOXRECT", "BOUNDINGBOXDIST", "PATHSEGMENT":
+		return 0, true
+
+	case "SEGMENTCOUNT":
+		return 1, true
+
+	// CONCATENATE - string concatenation (limited support)
+	case "CONCATENATE", "CAT", "_CAT_":
+		// Return 0 as we can't return strings, but mark as supported
+		return 0, true
+
 	}
 
 	return 0, false
+}
+
+// combinations calculates n choose k
+func combinations(n, k int) float64 {
+	if k > n || k < 0 {
+		return 0
+	}
+	if k == 0 || k == n {
+		return 1
+	}
+	result := 1.0
+	for i := 0; i < k; i++ {
+		result = result * float64(n-i) / float64(i+1)
+	}
+	return result
+}
+
+// permutations calculates n permute k
+func permutations(n, k int) float64 {
+	if k > n || k < 0 {
+		return 0
+	}
+	result := 1.0
+	for i := 0; i < k; i++ {
+		result *= float64(n - i)
+	}
+	return result
 }
 
 // parseArgs splits a comma-separated argument string, respecting parentheses.
@@ -859,6 +1899,47 @@ func (e *FormulaEvaluator) evalCellRef(ref string) (float64, bool) {
 	}
 
 	if e.shape == nil {
+		return 0, false
+	}
+
+	// Handle TheCel reference token - inherits from master shape
+	if strings.HasPrefix(ref, "TheCel") || strings.HasPrefix(ref, "THECEL") {
+		cellName := strings.TrimPrefix(strings.TrimPrefix(ref, "TheCel"), "THECEL")
+		cellName = strings.TrimPrefix(cellName, "!")
+		if cellName != "" {
+			if master := e.shape.MasterShape(); master != nil {
+				if val := master.CellValue(cellName); val != "" {
+					if v, err := strconv.ParseFloat(val, 64); err == nil {
+						return v, true
+					}
+				}
+			}
+		}
+		return 0, false
+	}
+
+	// Handle Sheet.N!Cell references (cross-shape references)
+	if strings.HasPrefix(ref, "Sheet.") && strings.Contains(ref, "!") {
+		parts := strings.SplitN(ref, "!", 2)
+		if len(parts) == 2 {
+			sheetRef := parts[0]
+			cellName := parts[1]
+			shapeID := strings.TrimPrefix(sheetRef, "Sheet.")
+
+			// Find the shape on the same page
+			if e.shape.Page != nil {
+				for _, s := range e.shape.Page.AllShapes() {
+					if s.ID == shapeID {
+						if val := s.CellValue(cellName); val != "" {
+							if v, err := strconv.ParseFloat(val, 64); err == nil {
+								return v, true
+							}
+						}
+						break
+					}
+				}
+			}
+		}
 		return 0, false
 	}
 
