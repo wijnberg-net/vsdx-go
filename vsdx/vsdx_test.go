@@ -7375,3 +7375,275 @@ func TestGeometryPathFunctions(t *testing.T) {
 		t.Logf("POINTALONGPATH formula X = %v", pointX)
 	}
 }
+
+func TestBevelEffect(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading bevel effect (should return zeros for shapes without bevel)
+	bevel := shape.BevelEffect()
+	if bevel == nil {
+		t.Fatal("BevelEffect() returned nil")
+	}
+	t.Logf("Initial bevel: TopType=%d, TopWidth=%f", bevel.TopType, bevel.TopWidth)
+
+	// Test setting bevel effect
+	newBevel := &BevelEffect{
+		TopType:       1,
+		TopWidth:      0.5,
+		TopHeight:     0.25,
+		BottomType:    2,
+		BottomWidth:   0.3,
+		BottomHeight:  0.15,
+		DepthColor:    "#FF0000",
+		DepthSize:     0.1,
+		ContourColor:  "#00FF00",
+		ContourSize:   0.05,
+		MaterialType:  3,
+		LightingType:  5,
+		LightingAngle: 45.0,
+	}
+	shape.SetBevelEffect(newBevel)
+
+	// Verify the values were set
+	readBack := shape.BevelEffect()
+	if readBack.TopType != 1 {
+		t.Errorf("BevelTopType = %d, want 1", readBack.TopType)
+	}
+	if readBack.TopWidth != 0.5 {
+		t.Errorf("BevelTopWidth = %f, want 0.5", readBack.TopWidth)
+	}
+	if readBack.MaterialType != 3 {
+		t.Errorf("BevelMaterialType = %d, want 3", readBack.MaterialType)
+	}
+}
+
+func TestGlowEffect(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading glow effect
+	glow := shape.GlowEffect()
+	if glow == nil {
+		t.Fatal("GlowEffect() returned nil")
+	}
+
+	// Test setting glow effect
+	newGlow := &GlowEffect{
+		Color:      "#FF00FF",
+		ColorTrans: 0.5,
+		Size:       10.0,
+	}
+	shape.SetGlowEffect(newGlow)
+
+	readBack := shape.GlowEffect()
+	if readBack.Size != 10.0 {
+		t.Errorf("GlowSize = %f, want 10.0", readBack.Size)
+	}
+}
+
+func TestReflectionEffect(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading reflection effect
+	reflection := shape.ReflectionEffect()
+	if reflection == nil {
+		t.Fatal("ReflectionEffect() returned nil")
+	}
+
+	// Test setting reflection effect
+	newReflection := &ReflectionEffect{
+		Size:  50.0,
+		Trans: 0.3,
+		Dist:  0.1,
+		Blur:  5.0,
+	}
+	shape.SetReflectionEffect(newReflection)
+
+	readBack := shape.ReflectionEffect()
+	if readBack.Size != 50.0 {
+		t.Errorf("ReflectionSize = %f, want 50.0", readBack.Size)
+	}
+}
+
+func TestSketchEffect(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading sketch effect
+	sketch := shape.SketchEffect()
+	if sketch == nil {
+		t.Fatal("SketchEffect() returned nil")
+	}
+
+	// Test setting sketch effect
+	newSketch := &SketchEffect{
+		Enabled:    true,
+		Seed:       12345,
+		Amount:     0.5,
+		LineWeight: 0.2,
+		LineChange: 0.1,
+		FillChange: 0.05,
+	}
+	shape.SetSketchEffect(newSketch)
+
+	readBack := shape.SketchEffect()
+	if !readBack.Enabled {
+		t.Error("SketchEnabled should be true")
+	}
+	if readBack.Seed != 12345 {
+		t.Errorf("SketchSeed = %d, want 12345", readBack.Seed)
+	}
+}
+
+func TestRotation3DEffect(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading 3D rotation effect
+	rotation := shape.Rotation3DEffect()
+	if rotation == nil {
+		t.Fatal("Rotation3DEffect() returned nil")
+	}
+
+	// Test setting 3D rotation effect
+	newRotation := &Rotation3DEffect{
+		XAngle:             30.0,
+		YAngle:             45.0,
+		ZAngle:             60.0,
+		RotationType:       1,
+		Perspective:        0.5,
+		DistanceFromGround: 10.0,
+		KeepTextFlat:       true,
+	}
+	shape.SetRotation3DEffect(newRotation)
+
+	readBack := shape.Rotation3DEffect()
+	if readBack.XAngle != 30.0 {
+		t.Errorf("RotationXAngle = %f, want 30.0", readBack.XAngle)
+	}
+	if !readBack.KeepTextFlat {
+		t.Error("KeepTextFlat should be true")
+	}
+}
+
+func TestQuickStyle(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading QuickStyle
+	qs := shape.QuickStyle()
+	if qs == nil {
+		t.Fatal("QuickStyle() returned nil")
+	}
+	t.Logf("Initial QuickStyle: Type=%d, FillMatrix=%d, LineColor=%d", qs.Type, qs.FillMatrix, qs.LineColor)
+
+	// Test setting QuickStyle
+	newQS := &QuickStyle{
+		Type:          1,
+		Variation:     2,
+		LineMatrix:    3,
+		FillMatrix:    4,
+		EffectsMatrix: 5,
+		FontMatrix:    1,
+		LineColor:     2,
+		FillColor:     3,
+		ShadowColor:   4,
+		FontColor:     5,
+	}
+	shape.SetQuickStyle(newQS)
+
+	readBack := shape.QuickStyle()
+	if readBack.Type != 1 {
+		t.Errorf("QuickStyleType = %d, want 1", readBack.Type)
+	}
+	if readBack.Variation != 2 {
+		t.Errorf("QuickStyleVariation = %d, want 2", readBack.Variation)
+	}
+	if readBack.FillMatrix != 4 {
+		t.Errorf("QuickStyleFillMatrix = %d, want 4", readBack.FillMatrix)
+	}
+	if readBack.FillColor != 3 {
+		t.Errorf("QuickStyleFillColor = %d, want 3", readBack.FillColor)
+	}
+}
+
+func TestSoftEdgesSize(t *testing.T) {
+	vis, err := Open("../tests/test1.vsdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vis.Close()
+
+	shapes := vis.Pages[0].AllShapes()
+	if len(shapes) == 0 {
+		t.Fatal("no shapes")
+	}
+	shape := shapes[0]
+
+	// Test reading soft edges
+	size := shape.SoftEdgesSize()
+	t.Logf("Initial SoftEdgesSize = %f", size)
+
+	// Test setting soft edges
+	shape.SetSoftEdgesSize(5.0)
+	readBack := shape.SoftEdgesSize()
+	if readBack != 5.0 {
+		t.Errorf("SoftEdgesSize = %f, want 5.0", readBack)
+	}
+}

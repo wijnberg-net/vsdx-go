@@ -14,7 +14,7 @@ vsdx-go/
 │   │── # Core types
 │   ├── vsdxfile.go             # VisioFile: Open/Close/Save, page management, doc props (1525 lines)
 │   ├── page.go                 # Page: shapes, search, connects, dimensions, layers, backgrounds (565 lines)
-│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie, protection (1831 lines)
+│   ├── shape.go                # Shape: positie, tekst, stijl, cellen, hiërarchie, 3D effects (2051 lines)
 │   ├── cell.go                 # Cell: name/value/formula/unit/error (84 lines)
 │   ├── connect.go              # Connect: from/to shape relaties (52 lines)
 │   ├── data_property.go        # DataProperty: custom shape properties met master inheritance (123 lines)
@@ -40,7 +40,7 @@ vsdx-go/
 │   │── # Stencils & Masters
 │   ├── master.go               # CreateMaster, DeleteMaster, DuplicateMaster (305 lines)
 │   ├── stencil.go              # Stencil: .vssx stencil bestanden (357 lines)
-│   ├── theme.go                # Theme: document themes, effects, variants (754 lines)
+│   ├── theme.go                # Theme: document themes, effects, variants, QuickStyle (917 lines)
 │   ├── styles.go               # StyleSheet: style inheritance en toepassing (320 lines)
 │   │
 │   │── # Comments & Data Links
@@ -49,7 +49,7 @@ vsdx-go/
 │   ├── datalink.go             # DataLink: DataConnections, DataRecordSets (275 lines)
 │   │
 │   │── # Support
-│   ├── cellname.go             # CellName constants: 40+ cel definities (83 lines)
+│   ├── cellname.go             # CellName constants: 70+ cel definities incl. 3D/effects (141 lines)
 │   ├── errors.go               # Sentinel errors: ErrInvalidFileType, FileError (27 lines)
 │   ├── types.go                # Result structs: Point, Rect (27 lines)
 │   ├── namespace.go            # XML namespace constants (14 lines)
@@ -221,8 +221,8 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
 
 ## Huidige Status
 
-- 34 Go source bestanden, ~14,700 lines code + ~8,700 lines tests = ~23,400 total
-- 445 test cases (alle passing), ~90% code coverage
+- 34 Go source bestanden, ~15,200 lines code + ~9,000 lines tests = ~24,200 total
+- 452 test cases (alle passing), ~90% code coverage
 - **100% MS-VSDX spec coverage** (21 secties + 172 formule functies + volledige style/theme support)
 - Alle fasen compleet: lezen, navigatie, bewerken, schrijven, connectors, templating, diff
 - **Rendering features**: SVG met line patterns (24 types), arrow markers (45+ types), 
@@ -233,6 +233,10 @@ cd /home/michel/vsdx-go && go test ./vsdx/... -run TestName -v
 - **Data features**: comments/annotations (read+write), data links/recordsets, reviewers (read+write)
 - **Package features**: root relationships, core/custom document properties, Cell U/E attributes
 - **Section types**: SmartTag, ActionTag, ConnectionABCD, plus alle originele 18 types
+- **3D Effect cells** (MS-VSDX §2.2.7.3): BevelEffect (13 cells), GlowEffect (3 cells),
+  ReflectionEffect (4 cells), SketchEffect (6 cells), Rotation3DEffect (7 cells), SoftEdgesSize
+- **QuickStyle slices** (MS-VSDX §2.2.7.4.3): alle 7 slices (LineMatrix, FillMatrix, EffectsMatrix,
+  FontMatrix, LineColor, FillColor, ShadowColor) + FontColor, Type, Variation
 - Netwerk-diagram features: character/paragraph formatting, fill transparency, line patterns,
   geometry builders, layers, hyperlinks, connection points, protection, user-defined cells
 - Idiomatisch Go: cell constants, sentinel errors, typed interfaces, result structs

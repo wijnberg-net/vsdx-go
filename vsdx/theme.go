@@ -1,6 +1,7 @@
 package vsdx
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/beevik/etree"
@@ -549,18 +550,72 @@ func parseInt(s string) (int, error) {
 	return v, nil
 }
 
-// QuickStyleFillColor returns the fill color determined by QuickStyle settings.
-func (s *Shape) QuickStyleFillColor() string {
-	qsType := s.CellValue("QuickStyleType")
-	qsVar := s.CellValue("QuickStyleVariation")
-	qsFill := s.CellValue("QuickStyleFillColor")
+// QuickStyle holds all 7 quick style slices per MS-VSDX §2.2.7.4.3.
+type QuickStyle struct {
+	Type          int // QuickStyleType: determines if connector or effect scheme is used
+	Variation     int // QuickStyleVariation: selects variant (0-3)
+	LineMatrix    int // QuickStyleLineMatrix: line style slice (0-5)
+	FillMatrix    int // QuickStyleFillMatrix: fill style slice (0-5)
+	EffectsMatrix int // QuickStyleEffectsMatrix: effects style slice (0-5)
+	FontMatrix    int // QuickStyleFontMatrix: font style slice (0-5)
+	LineColor     int // QuickStyleLineColor: color index (0-8)
+	FillColor     int // QuickStyleFillColor: color index (0-8)
+	ShadowColor   int // QuickStyleShadowColor: color index (0-8)
+	FontColor     int // QuickStyleFontColor: color index (0-8)
+}
 
-	// If explicit QuickStyleFillColor is set, use it.
-	if qsFill != "" {
-		return s.ResolveThemeColor("QuickStyleFillColor")
+// QuickStyle returns the quick style settings for this shape.
+func (s *Shape) QuickStyle() *QuickStyle {
+	return &QuickStyle{
+		Type:          int(toFloat(s.CellValue(CellQuickStyleType))),
+		Variation:     int(toFloat(s.CellValue(CellQuickStyleVariation))),
+		LineMatrix:    int(toFloat(s.CellValue(CellQuickStyleLineMatrix))),
+		FillMatrix:    int(toFloat(s.CellValue(CellQuickStyleFillMatrix))),
+		EffectsMatrix: int(toFloat(s.CellValue(CellQuickStyleEffectsMatrix))),
+		FontMatrix:    int(toFloat(s.CellValue(CellQuickStyleFontMatrix))),
+		LineColor:     int(toFloat(s.CellValue(CellQuickStyleLineColor))),
+		FillColor:     int(toFloat(s.CellValue(CellQuickStyleFillColor))),
+		ShadowColor:   int(toFloat(s.CellValue(CellQuickStyleShadowColor))),
+		FontColor:     int(toFloat(s.CellValue(CellQuickStyleFontColor))),
+	}
+}
+
+// SetQuickStyle sets the quick style settings for this shape.
+func (s *Shape) SetQuickStyle(qs *QuickStyle) {
+	if qs == nil {
+		return
+	}
+	s.SetCellValue(CellQuickStyleType, fmtInt(qs.Type))
+	s.SetCellValue(CellQuickStyleVariation, fmtInt(qs.Variation))
+	s.SetCellValue(CellQuickStyleLineMatrix, fmtInt(qs.LineMatrix))
+	s.SetCellValue(CellQuickStyleFillMatrix, fmtInt(qs.FillMatrix))
+	s.SetCellValue(CellQuickStyleEffectsMatrix, fmtInt(qs.EffectsMatrix))
+	s.SetCellValue(CellQuickStyleFontMatrix, fmtInt(qs.FontMatrix))
+	s.SetCellValue(CellQuickStyleLineColor, fmtInt(qs.LineColor))
+	s.SetCellValue(CellQuickStyleFillColor, fmtInt(qs.FillColor))
+	s.SetCellValue(CellQuickStyleShadowColor, fmtInt(qs.ShadowColor))
+	s.SetCellValue(CellQuickStyleFontColor, fmtInt(qs.FontColor))
+}
+
+// fmtInt formats an integer for XML output.
+func fmtInt(i int) string {
+	return strconv.Itoa(i)
+}
+
+// QuickStyleFillColor returns the fill color determined by QuickStyle settings.
+// This resolves the QuickStyleFillColor index through the theme's color scheme
+// and variant per MS-VSDX §2.2.7.4.3.
+func (s *Shape) QuickStyleFillColor() string {
+	qsFillRaw := s.CellValue(CellQuickStyleFillColor)
+
+	// If explicit QuickStyleFillColor is set, resolve through theme.
+	if qsFillRaw != "" {
+		return s.resolveQuickStyleColor(int(toFloat(qsFillRaw)), "fill")
 	}
 
 	// Otherwise, derive from type and variation.
+	qsType := s.CellValue(CellQuickStyleType)
+	qsVar := s.CellValue(CellQuickStyleVariation)
 	if qsType == "" && qsVar == "" {
 		return ""
 	}
@@ -574,7 +629,7 @@ func (s *Shape) QuickStyleFillColor() string {
 		return ""
 	}
 
-	// Map QuickStyleType to accent colors.
+	// Map QuickStyleType to accent colors (indices 0-5 map to accent1-6).
 	typeIdx := int(toFloat(qsType))
 	if typeIdx >= 0 && typeIdx <= 5 {
 		return theme.ThemeColor(4 + typeIdx) // accent1-6 are indices 4-9
@@ -585,11 +640,63 @@ func (s *Shape) QuickStyleFillColor() string {
 
 // QuickStyleLineColor returns the line color determined by QuickStyle settings.
 func (s *Shape) QuickStyleLineColor() string {
-	qsLine := s.CellValue("QuickStyleLineColor")
-	if qsLine != "" {
-		return s.ResolveThemeColor("QuickStyleLineColor")
+	qsLineRaw := s.CellValue(CellQuickStyleLineColor)
+	if qsLineRaw != "" {
+		return s.resolveQuickStyleColor(int(toFloat(qsLineRaw)), "line")
 	}
 	return ""
+}
+
+// QuickStyleShadowColor returns the shadow color determined by QuickStyle settings.
+func (s *Shape) QuickStyleShadowColor() string {
+	qsShadowRaw := s.CellValue(CellQuickStyleShadowColor)
+	if qsShadowRaw != "" {
+		return s.resolveQuickStyleColor(int(toFloat(qsShadowRaw)), "shadow")
+	}
+	return ""
+}
+
+// QuickStyleFontColor returns the font color determined by QuickStyle settings.
+func (s *Shape) QuickStyleFontColor() string {
+	qsFontRaw := s.CellValue(CellQuickStyleFontColor)
+	if qsFontRaw != "" {
+		return s.resolveQuickStyleColor(int(toFloat(qsFontRaw)), "font")
+	}
+	return ""
+}
+
+// resolveQuickStyleColor resolves a QuickStyle color index through the theme.
+// Per MS-VSDX §2.2.7.4.3, color indices 0-8 map to:
+// 0: dark1, 1: light1, 2: dark2, 3: light2, 4-9: accent1-6
+func (s *Shape) resolveQuickStyleColor(colorIdx int, colorType string) string {
+	vis := s.Page.vis
+	if vis == nil {
+		return ""
+	}
+	theme := vis.Theme()
+	if theme == nil {
+		return ""
+	}
+
+	// Get the variation index for variant-specific colors.
+	varIdx := int(toFloat(s.CellValue(CellQuickStyleVariation)))
+	if varIdx >= 0 && varIdx < len(theme.Variants) {
+		variant := &theme.Variants[varIdx]
+		// Check if variant has specific color for this type.
+		switch colorType {
+		case "fill":
+			if variant.FillColor != "" {
+				return variant.FillColor
+			}
+		case "line":
+			if variant.LineColor != "" {
+				return variant.LineColor
+			}
+		}
+	}
+
+	// Fall back to base theme colors by index.
+	return theme.ThemeColor(colorIdx)
 }
 
 // ThemeVariant returns the theme variant by index (0-3).

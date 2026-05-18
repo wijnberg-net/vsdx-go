@@ -66,6 +66,64 @@ const (
 	// Page dimension cells
 	CellPageWidth  CellName = "PageWidth"
 	CellPageHeight CellName = "PageHeight"
+
+	// 3D/Bevel effect cells (MS-VSDX §2.2.7.3.2)
+	CellBevelTopType      CellName = "BevelTopType"
+	CellBevelTopWidth     CellName = "BevelTopWidth"
+	CellBevelTopHeight    CellName = "BevelTopHeight"
+	CellBevelBottomType   CellName = "BevelBottomType"
+	CellBevelBottomWidth  CellName = "BevelBottomWidth"
+	CellBevelBottomHeight CellName = "BevelBottomHeight"
+	CellBevelDepthColor   CellName = "BevelDepthColor"
+	CellBevelDepthSize    CellName = "BevelDepthSize"
+	CellBevelContourColor CellName = "BevelContourColor"
+	CellBevelContourSize  CellName = "BevelContourSize"
+	CellBevelMaterialType CellName = "BevelMaterialType"
+	CellBevelLightingType CellName = "BevelLightingType"
+	CellBevelLightingAngle CellName = "BevelLightingAngle"
+
+	// Glow effect cells (MS-VSDX §2.2.7.3.3)
+	CellGlowColor      CellName = "GlowColor"
+	CellGlowColorTrans CellName = "GlowColorTrans"
+	CellGlowSize       CellName = "GlowSize"
+
+	// Reflection effect cells (MS-VSDX §2.2.7.3.4)
+	CellReflectionSize  CellName = "ReflectionSize"
+	CellReflectionTrans CellName = "ReflectionTrans"
+	CellReflectionDist  CellName = "ReflectionDist"
+	CellReflectionBlur  CellName = "ReflectionBlur"
+
+	// Soft edges effect cells (MS-VSDX §2.2.7.3.5)
+	CellSoftEdgesSize CellName = "SoftEdgesSize"
+
+	// Sketch effect cells (MS-VSDX §2.2.7.3.6)
+	CellSketchEnabled    CellName = "SketchEnabled"
+	CellSketchSeed       CellName = "SketchSeed"
+	CellSketchAmount     CellName = "SketchAmount"
+	CellSketchLineWeight CellName = "SketchLineWeight"
+	CellSketchLineChange CellName = "SketchLineChange"
+	CellSketchFillChange CellName = "SketchFillChange"
+
+	// 3D Rotation effect cells (MS-VSDX §2.2.7.3.7)
+	CellRotationXAngle     CellName = "RotationXAngle"
+	CellRotationYAngle     CellName = "RotationYAngle"
+	CellRotationZAngle     CellName = "RotationZAngle"
+	CellRotationType       CellName = "RotationType"
+	CellPerspective        CellName = "Perspective"
+	CellDistanceFromGround CellName = "DistanceFromGround"
+	CellKeepTextFlat       CellName = "KeepTextFlat"
+
+	// QuickStyle cells (MS-VSDX §2.2.7.4.3, §2.2.7.4.4)
+	CellQuickStyleType          CellName = "QuickStyleType"
+	CellQuickStyleLineMatrix    CellName = "QuickStyleLineMatrix"
+	CellQuickStyleFillMatrix    CellName = "QuickStyleFillMatrix"
+	CellQuickStyleEffectsMatrix CellName = "QuickStyleEffectsMatrix"
+	CellQuickStyleFontMatrix    CellName = "QuickStyleFontMatrix"
+	CellQuickStyleLineColor     CellName = "QuickStyleLineColor"
+	CellQuickStyleFillColor     CellName = "QuickStyleFillColor"
+	CellQuickStyleShadowColor   CellName = "QuickStyleShadowColor"
+	CellQuickStyleFontColor     CellName = "QuickStyleFontColor"
+	CellQuickStyleVariation     CellName = "QuickStyleVariation"
 )
 
 // Connect part constants used in FromPart/ToPart attributes.

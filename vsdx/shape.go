@@ -1829,3 +1829,223 @@ func (s *Shape) UniversalName() string {
 	}
 	return nameUniv
 }
+
+// --- 3D/Bevel Effect Methods (MS-VSDX §2.2.7.3.2) ---
+
+// BevelEffect holds 3D bevel effect properties for a shape.
+type BevelEffect struct {
+	TopType       int     // Bevel type for top face (0=none, 1-12=types)
+	TopWidth      float64 // Width of top bevel
+	TopHeight     float64 // Height of top bevel
+	BottomType    int     // Bevel type for bottom face
+	BottomWidth   float64 // Width of bottom bevel
+	BottomHeight  float64 // Height of bottom bevel
+	DepthColor    string  // Color of bevel depth
+	DepthSize     float64 // Size of bevel depth
+	ContourColor  string  // Color of bevel contour
+	ContourSize   float64 // Size of bevel contour
+	MaterialType  int     // Material type (1-10)
+	LightingType  int     // Lighting type (1-15)
+	LightingAngle float64 // Lighting angle in degrees
+}
+
+// BevelEffect returns the 3D bevel effect properties for this shape.
+func (s *Shape) BevelEffect() *BevelEffect {
+	return &BevelEffect{
+		TopType:       int(toFloat(s.CellValue(CellBevelTopType))),
+		TopWidth:      toFloat(s.CellValue(CellBevelTopWidth)),
+		TopHeight:     toFloat(s.CellValue(CellBevelTopHeight)),
+		BottomType:    int(toFloat(s.CellValue(CellBevelBottomType))),
+		BottomWidth:   toFloat(s.CellValue(CellBevelBottomWidth)),
+		BottomHeight:  toFloat(s.CellValue(CellBevelBottomHeight)),
+		DepthColor:    s.CellValue(CellBevelDepthColor),
+		DepthSize:     toFloat(s.CellValue(CellBevelDepthSize)),
+		ContourColor:  s.CellValue(CellBevelContourColor),
+		ContourSize:   toFloat(s.CellValue(CellBevelContourSize)),
+		MaterialType:  int(toFloat(s.CellValue(CellBevelMaterialType))),
+		LightingType:  int(toFloat(s.CellValue(CellBevelLightingType))),
+		LightingAngle: toFloat(s.CellValue(CellBevelLightingAngle)),
+	}
+}
+
+// SetBevelEffect sets the 3D bevel effect properties for this shape.
+func (s *Shape) SetBevelEffect(effect *BevelEffect) {
+	if effect == nil {
+		return
+	}
+	s.SetCellValue(CellBevelTopType, strconv.Itoa(effect.TopType))
+	s.SetCellValue(CellBevelTopWidth, fmtFloat(effect.TopWidth))
+	s.SetCellValue(CellBevelTopHeight, fmtFloat(effect.TopHeight))
+	s.SetCellValue(CellBevelBottomType, strconv.Itoa(effect.BottomType))
+	s.SetCellValue(CellBevelBottomWidth, fmtFloat(effect.BottomWidth))
+	s.SetCellValue(CellBevelBottomHeight, fmtFloat(effect.BottomHeight))
+	if effect.DepthColor != "" {
+		s.SetCellValue(CellBevelDepthColor, effect.DepthColor)
+	}
+	s.SetCellValue(CellBevelDepthSize, fmtFloat(effect.DepthSize))
+	if effect.ContourColor != "" {
+		s.SetCellValue(CellBevelContourColor, effect.ContourColor)
+	}
+	s.SetCellValue(CellBevelContourSize, fmtFloat(effect.ContourSize))
+	s.SetCellValue(CellBevelMaterialType, strconv.Itoa(effect.MaterialType))
+	s.SetCellValue(CellBevelLightingType, strconv.Itoa(effect.LightingType))
+	s.SetCellValue(CellBevelLightingAngle, fmtFloat(effect.LightingAngle))
+}
+
+// --- Glow Effect Methods (MS-VSDX §2.2.7.3.3) ---
+
+// GlowEffect holds glow effect properties for a shape.
+type GlowEffect struct {
+	Color      string  // Glow color
+	ColorTrans float64 // Glow color transparency (0-1)
+	Size       float64 // Glow size in points
+}
+
+// GlowEffect returns the glow effect properties for this shape.
+func (s *Shape) GlowEffect() *GlowEffect {
+	return &GlowEffect{
+		Color:      s.CellValue(CellGlowColor),
+		ColorTrans: toFloat(s.CellValue(CellGlowColorTrans)),
+		Size:       toFloat(s.CellValue(CellGlowSize)),
+	}
+}
+
+// SetGlowEffect sets the glow effect properties for this shape.
+func (s *Shape) SetGlowEffect(effect *GlowEffect) {
+	if effect == nil {
+		return
+	}
+	if effect.Color != "" {
+		s.SetCellValue(CellGlowColor, effect.Color)
+	}
+	s.SetCellValue(CellGlowColorTrans, fmtFloat(effect.ColorTrans))
+	s.SetCellValue(CellGlowSize, fmtFloat(effect.Size))
+}
+
+// --- Reflection Effect Methods (MS-VSDX §2.2.7.3.4) ---
+
+// ReflectionEffect holds reflection effect properties for a shape.
+type ReflectionEffect struct {
+	Size  float64 // Reflection size (0-100)
+	Trans float64 // Reflection transparency (0-1)
+	Dist  float64 // Distance from shape
+	Blur  float64 // Blur amount
+}
+
+// ReflectionEffect returns the reflection effect properties for this shape.
+func (s *Shape) ReflectionEffect() *ReflectionEffect {
+	return &ReflectionEffect{
+		Size:  toFloat(s.CellValue(CellReflectionSize)),
+		Trans: toFloat(s.CellValue(CellReflectionTrans)),
+		Dist:  toFloat(s.CellValue(CellReflectionDist)),
+		Blur:  toFloat(s.CellValue(CellReflectionBlur)),
+	}
+}
+
+// SetReflectionEffect sets the reflection effect properties for this shape.
+func (s *Shape) SetReflectionEffect(effect *ReflectionEffect) {
+	if effect == nil {
+		return
+	}
+	s.SetCellValue(CellReflectionSize, fmtFloat(effect.Size))
+	s.SetCellValue(CellReflectionTrans, fmtFloat(effect.Trans))
+	s.SetCellValue(CellReflectionDist, fmtFloat(effect.Dist))
+	s.SetCellValue(CellReflectionBlur, fmtFloat(effect.Blur))
+}
+
+// --- Soft Edges Effect Methods (MS-VSDX §2.2.7.3.5) ---
+
+// SoftEdgesSize returns the soft edges size for this shape.
+func (s *Shape) SoftEdgesSize() float64 {
+	return toFloat(s.CellValue(CellSoftEdgesSize))
+}
+
+// SetSoftEdgesSize sets the soft edges size for this shape.
+func (s *Shape) SetSoftEdgesSize(size float64) {
+	s.SetCellValue(CellSoftEdgesSize, fmtFloat(size))
+}
+
+// --- Sketch Effect Methods (MS-VSDX §2.2.7.3.6) ---
+
+// SketchEffect holds sketch effect properties for a shape.
+type SketchEffect struct {
+	Enabled    bool    // Whether sketch effect is enabled
+	Seed       int     // Random seed for sketch
+	Amount     float64 // Amount of sketch distortion
+	LineWeight float64 // Line weight variation
+	LineChange float64 // Line change variation
+	FillChange float64 // Fill change variation
+}
+
+// SketchEffect returns the sketch effect properties for this shape.
+func (s *Shape) SketchEffect() *SketchEffect {
+	return &SketchEffect{
+		Enabled:    toFloat(s.CellValue(CellSketchEnabled)) != 0,
+		Seed:       int(toFloat(s.CellValue(CellSketchSeed))),
+		Amount:     toFloat(s.CellValue(CellSketchAmount)),
+		LineWeight: toFloat(s.CellValue(CellSketchLineWeight)),
+		LineChange: toFloat(s.CellValue(CellSketchLineChange)),
+		FillChange: toFloat(s.CellValue(CellSketchFillChange)),
+	}
+}
+
+// SetSketchEffect sets the sketch effect properties for this shape.
+func (s *Shape) SetSketchEffect(effect *SketchEffect) {
+	if effect == nil {
+		return
+	}
+	if effect.Enabled {
+		s.SetCellValue(CellSketchEnabled, "1")
+	} else {
+		s.SetCellValue(CellSketchEnabled, "0")
+	}
+	s.SetCellValue(CellSketchSeed, strconv.Itoa(effect.Seed))
+	s.SetCellValue(CellSketchAmount, fmtFloat(effect.Amount))
+	s.SetCellValue(CellSketchLineWeight, fmtFloat(effect.LineWeight))
+	s.SetCellValue(CellSketchLineChange, fmtFloat(effect.LineChange))
+	s.SetCellValue(CellSketchFillChange, fmtFloat(effect.FillChange))
+}
+
+// --- 3D Rotation Effect Methods (MS-VSDX §2.2.7.3.7) ---
+
+// Rotation3DEffect holds 3D rotation effect properties for a shape.
+type Rotation3DEffect struct {
+	XAngle           float64 // Rotation around X axis in degrees
+	YAngle           float64 // Rotation around Y axis in degrees
+	ZAngle           float64 // Rotation around Z axis in degrees
+	RotationType     int     // Rotation type (0=parallel, 1=perspective)
+	Perspective      float64 // Perspective field of view
+	DistanceFromGround float64 // Distance from ground plane
+	KeepTextFlat     bool    // Whether to keep text flat (not rotated)
+}
+
+// Rotation3DEffect returns the 3D rotation effect properties for this shape.
+func (s *Shape) Rotation3DEffect() *Rotation3DEffect {
+	return &Rotation3DEffect{
+		XAngle:           toFloat(s.CellValue(CellRotationXAngle)),
+		YAngle:           toFloat(s.CellValue(CellRotationYAngle)),
+		ZAngle:           toFloat(s.CellValue(CellRotationZAngle)),
+		RotationType:     int(toFloat(s.CellValue(CellRotationType))),
+		Perspective:      toFloat(s.CellValue(CellPerspective)),
+		DistanceFromGround: toFloat(s.CellValue(CellDistanceFromGround)),
+		KeepTextFlat:     toFloat(s.CellValue(CellKeepTextFlat)) != 0,
+	}
+}
+
+// SetRotation3DEffect sets the 3D rotation effect properties for this shape.
+func (s *Shape) SetRotation3DEffect(effect *Rotation3DEffect) {
+	if effect == nil {
+		return
+	}
+	s.SetCellValue(CellRotationXAngle, fmtFloat(effect.XAngle))
+	s.SetCellValue(CellRotationYAngle, fmtFloat(effect.YAngle))
+	s.SetCellValue(CellRotationZAngle, fmtFloat(effect.ZAngle))
+	s.SetCellValue(CellRotationType, strconv.Itoa(effect.RotationType))
+	s.SetCellValue(CellPerspective, fmtFloat(effect.Perspective))
+	s.SetCellValue(CellDistanceFromGround, fmtFloat(effect.DistanceFromGround))
+	if effect.KeepTextFlat {
+		s.SetCellValue(CellKeepTextFlat, "1")
+	} else {
+		s.SetCellValue(CellKeepTextFlat, "0")
+	}
+}
