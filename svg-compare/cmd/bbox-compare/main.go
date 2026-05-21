@@ -19,11 +19,29 @@ type SVG struct {
 }
 
 type Group struct {
-	ID        string  `xml:"id,attr"`
-	Transform string  `xml:"transform,attr"`
-	Paths     []Path  `xml:"path"`
-	Texts     []Text  `xml:"text"`
-	Groups    []Group `xml:"g"`
+	ID        string    `xml:"id,attr"`
+	Transform string    `xml:"transform,attr"`
+	Paths     []Path    `xml:"path"`
+	Rects     []Rect    `xml:"rect"`
+	Ellipses  []Ellipse `xml:"ellipse"`
+	Texts     []Text    `xml:"text"`
+	Groups    []Group   `xml:"g"`
+}
+
+type Rect struct {
+	X         string `xml:"x,attr"`
+	Y         string `xml:"y,attr"`
+	Width     string `xml:"width,attr"`
+	Height    string `xml:"height,attr"`
+	Transform string `xml:"transform,attr"`
+}
+
+type Ellipse struct {
+	CX        string `xml:"cx,attr"`
+	CY        string `xml:"cy,attr"`
+	RX        string `xml:"rx,attr"`
+	RY        string `xml:"ry,attr"`
+	Transform string `xml:"transform,attr"`
 }
 
 type Path struct {
@@ -198,7 +216,19 @@ func main() {
 
 	fmt.Printf("Matched by shape ID: %d shapes\n", matchedCount)
 	fmt.Printf("Shapes in SVG1: %d\n", len(boxes1))
-	fmt.Printf("Shapes in SVG2: %d\n\n", len(boxes2))
+	fmt.Printf("Shapes in SVG2: %d\n", len(boxes2))
+
+	// Report unmatched shapes from SVG1
+	var unmatched1 []string
+	for _, b1 := range boxes1 {
+		if b1.ShapeID == "" || len(svg2ByID[b1.ShapeID]) == 0 {
+			unmatched1 = append(unmatched1, b1.ID)
+		}
+	}
+	if len(unmatched1) > 0 {
+		fmt.Printf("Unmatched in SVG1: %v\n", unmatched1)
+	}
+	fmt.Println()
 
 	// Show worst matches
 	fmt.Println("=== Largest Position Deviations ===")
@@ -260,8 +290,8 @@ func extractGroupBBoxes(g Group, parentTx Matrix) []ShapeBBox {
 
 	tx := parentTx.Multiply(ParseTransform(g.Transform))
 
-	// If this group has paths, compute its bbox
-	if len(g.Paths) > 0 {
+	// If this group has geometric elements, compute its bbox
+	if len(g.Paths) > 0 || len(g.Rects) > 0 || len(g.Ellipses) > 0 {
 		bbox := computeGroupBBox(g, tx)
 		if bbox.MaxX > bbox.MinX && bbox.MaxY > bbox.MinY {
 			boxes = append(boxes, bbox)
@@ -284,23 +314,58 @@ func computeGroupBBox(g Group, tx Matrix) ShapeBBox {
 		MaxX:    -math.MaxFloat64, MaxY: -math.MaxFloat64,
 	}
 
+	updateBBox := func(wx, wy float64) {
+		if wx < bbox.MinX {
+			bbox.MinX = wx
+		}
+		if wx > bbox.MaxX {
+			bbox.MaxX = wx
+		}
+		if wy < bbox.MinY {
+			bbox.MinY = wy
+		}
+		if wy > bbox.MaxY {
+			bbox.MaxY = wy
+		}
+	}
+
 	for _, p := range g.Paths {
 		pathTx := tx.Multiply(ParseTransform(p.Transform))
 		points := extractPathPoints(p.D)
 		for _, pt := range points {
 			wx, wy := pathTx.Apply(pt[0], pt[1])
-			if wx < bbox.MinX {
-				bbox.MinX = wx
-			}
-			if wx > bbox.MaxX {
-				bbox.MaxX = wx
-			}
-			if wy < bbox.MinY {
-				bbox.MinY = wy
-			}
-			if wy > bbox.MaxY {
-				bbox.MaxY = wy
-			}
+			updateBBox(wx, wy)
+		}
+		bbox.Paths++
+	}
+
+	for _, r := range g.Rects {
+		rectTx := tx.Multiply(ParseTransform(r.Transform))
+		x := parseNum(r.X)
+		y := parseNum(r.Y)
+		w := parseNum(r.Width)
+		h := parseNum(r.Height)
+		// Transform all four corners
+		for _, pt := range [][2]float64{{x, y}, {x + w, y}, {x, y + h}, {x + w, y + h}} {
+			wx, wy := rectTx.Apply(pt[0], pt[1])
+			updateBBox(wx, wy)
+		}
+		bbox.Paths++
+	}
+
+	for _, e := range g.Ellipses {
+		ellTx := tx.Multiply(ParseTransform(e.Transform))
+		cx := parseNum(e.CX)
+		cy := parseNum(e.CY)
+		rx := parseNum(e.RX)
+		ry := parseNum(e.RY)
+		// Use bounding box of ellipse
+		for _, pt := range [][2]float64{
+			{cx - rx, cy - ry}, {cx + rx, cy - ry},
+			{cx - rx, cy + ry}, {cx + rx, cy + ry},
+		} {
+			wx, wy := ellTx.Apply(pt[0], pt[1])
+			updateBBox(wx, wy)
 		}
 		bbox.Paths++
 	}
