@@ -1,6 +1,7 @@
 package vsdx
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,13 @@ type Theme struct {
 	Effects            ThemeEffects
 	Variants           []ThemeVariant
 	ConnectorLineStyles []ConnectorLineStyle // Connector arrow/line style presets
+	LineStyles          []LineStyleColor      // Non-connector line styles from fmtScheme/lnStyleLst
+}
+
+// LineStyleColor represents a resolved line style color from the theme.
+// These are indexed by QuickStyleLineMatrix for non-connector shapes.
+type LineStyleColor struct {
+	Color string // Resolved RGB hex color (e.g., "#C7C8C8")
 }
 
 // ConnectorLineStyle represents a connector line style from the theme.
@@ -152,6 +160,9 @@ func (v *VisioFile) Theme() *Theme {
 
 	// Parse connector line styles (for arrow resolution).
 	theme.ConnectorLineStyles = parseConnectorLineStyles(themeDoc)
+
+	// Parse non-connector line styles (for line colors).
+	theme.LineStyles = parseLineStyleColors(themeDoc, theme.Colors)
 
 	return theme
 }
@@ -491,6 +502,219 @@ func parseConnectorLineStyles(themeDoc *etree.Document) []ConnectorLineStyle {
 	}
 
 	return styles
+}
+
+// parseLineStyleColors extracts line style colors from the theme's fmtScheme/lnStyleLst.
+// These are used for non-connector shapes via QuickStyleLineMatrix.
+func parseLineStyleColors(themeDoc *etree.Document, colors ThemeColors) []LineStyleColor {
+	var styles []LineStyleColor
+
+	// Find lnStyleLst in fmtScheme
+	lnStyleLst := themeDoc.FindElement("//a:fmtScheme/a:lnStyleLst")
+	if lnStyleLst == nil {
+		lnStyleLst = themeDoc.FindElement("//fmtScheme/lnStyleLst")
+	}
+	if lnStyleLst == nil {
+		return styles
+	}
+
+	// Parse each ln element
+	for _, ln := range lnStyleLst.SelectElements("a:ln") {
+		style := LineStyleColor{}
+
+		// Find solidFill child
+		solidFill := ln.FindElement("a:solidFill")
+		if solidFill == nil {
+			solidFill = ln.FindElement("solidFill")
+		}
+		if solidFill != nil {
+			style.Color = parseSchemeColor(solidFill, colors)
+		}
+
+		styles = append(styles, style)
+	}
+
+	return styles
+}
+
+// parseSchemeColor parses a schemeClr element and resolves it to an RGB color.
+// Handles shade/tint transformations.
+func parseSchemeColor(parent *etree.Element, colors ThemeColors) string {
+	schemeClr := parent.FindElement("a:schemeClr")
+	if schemeClr == nil {
+		schemeClr = parent.FindElement("schemeClr")
+	}
+	if schemeClr == nil {
+		// Try srgbClr directly
+		if srgb := parent.FindElement("a:srgbClr"); srgb != nil {
+			return "#" + strings.ToUpper(srgb.SelectAttrValue("val", ""))
+		}
+		if srgb := parent.FindElement("srgbClr"); srgb != nil {
+			return "#" + strings.ToUpper(srgb.SelectAttrValue("val", ""))
+		}
+		return ""
+	}
+
+	// Get the scheme color reference
+	schemeVal := schemeClr.SelectAttrValue("val", "")
+	var baseColor string
+
+	switch schemeVal {
+	case "dk1":
+		baseColor = colors.Dark1
+	case "lt1":
+		baseColor = colors.Light1
+	case "dk2":
+		baseColor = colors.Dark2
+	case "lt2":
+		baseColor = colors.Light2
+	case "accent1":
+		baseColor = colors.Accent1
+	case "accent2":
+		baseColor = colors.Accent2
+	case "accent3":
+		baseColor = colors.Accent3
+	case "accent4":
+		baseColor = colors.Accent4
+	case "accent5":
+		baseColor = colors.Accent5
+	case "accent6":
+		baseColor = colors.Accent6
+	case "phClr":
+		// Placeholder color - depends on the shape's fill
+		// For now, return empty to use shape's color
+		return ""
+	default:
+		return ""
+	}
+
+	if baseColor == "" {
+		return ""
+	}
+
+	// Check for shade transformation
+	if shade := schemeClr.FindElement("a:shade"); shade != nil {
+		if v := shade.SelectAttrValue("val", ""); v != "" {
+			shadeVal := toFloat(v) / 100000.0 // val is in 1/100000ths
+			baseColor = applyShade(baseColor, shadeVal)
+		}
+	} else if shade := schemeClr.FindElement("shade"); shade != nil {
+		if v := shade.SelectAttrValue("val", ""); v != "" {
+			shadeVal := toFloat(v) / 100000.0
+			baseColor = applyShade(baseColor, shadeVal)
+		}
+	}
+
+	// Check for tint transformation
+	if tint := schemeClr.FindElement("a:tint"); tint != nil {
+		if v := tint.SelectAttrValue("val", ""); v != "" {
+			tintVal := toFloat(v) / 100000.0
+			baseColor = applyTint(baseColor, tintVal)
+		}
+	} else if tint := schemeClr.FindElement("tint"); tint != nil {
+		if v := tint.SelectAttrValue("val", ""); v != "" {
+			tintVal := toFloat(v) / 100000.0
+			baseColor = applyTint(baseColor, tintVal)
+		}
+	}
+
+	return baseColor
+}
+
+// applyShade applies a shade transformation to a color.
+// Shade darkens a color using sRGB gamma-corrected math.
+// DrawingML shade transformations use gamma 2.2 for perceptual correctness.
+// shadeVal is a fraction (0-1) where lower values = darker.
+func applyShade(color string, shadeVal float64) string {
+	r, g, b := parseHexColor(color)
+	if r < 0 {
+		return color
+	}
+
+	// Apply gamma-corrected shade transformation.
+	// In sRGB color space, the effective multiplier is shade^(1/gamma).
+	const gamma = 2.2
+	factor := math.Pow(shadeVal, 1.0/gamma)
+
+	r = int(math.Round(float64(r) * factor))
+	g = int(math.Round(float64(g) * factor))
+	b = int(math.Round(float64(b) * factor))
+
+	// Clamp to valid range
+	if r > 255 {
+		r = 255
+	}
+	if g > 255 {
+		g = 255
+	}
+	if b > 255 {
+		b = 255
+	}
+
+	return formatHexColor(r, g, b)
+}
+
+// applyTint applies a tint transformation to a color.
+// Tint lightens a color by moving RGB values toward white.
+// tintVal is a fraction (0-1) where higher values = lighter.
+func applyTint(color string, tintVal float64) string {
+	r, g, b := parseHexColor(color)
+	if r < 0 {
+		return color
+	}
+
+	// Tint moves color toward white
+	r = int(float64(r) + (255.0-float64(r))*tintVal)
+	g = int(float64(g) + (255.0-float64(g))*tintVal)
+	b = int(float64(b) + (255.0-float64(b))*tintVal)
+
+	// Clamp to valid range
+	if r > 255 {
+		r = 255
+	}
+	if g > 255 {
+		g = 255
+	}
+	if b > 255 {
+		b = 255
+	}
+
+	return formatHexColor(r, g, b)
+}
+
+// parseHexColor parses a hex color string like "#RGB" or "#RRGGBB".
+// Returns -1 for all components if parsing fails.
+func parseHexColor(color string) (r, g, b int) {
+	color = strings.TrimPrefix(color, "#")
+	if len(color) == 3 {
+		// Short form #RGB -> #RRGGBB
+		color = string(color[0]) + string(color[0]) +
+			string(color[1]) + string(color[1]) +
+			string(color[2]) + string(color[2])
+	}
+	if len(color) != 6 {
+		return -1, -1, -1
+	}
+
+	val, err := strconv.ParseInt(color, 16, 32)
+	if err != nil {
+		return -1, -1, -1
+	}
+
+	r = int((val >> 16) & 0xFF)
+	g = int((val >> 8) & 0xFF)
+	b = int(val & 0xFF)
+	return
+}
+
+// formatHexColor formats RGB values as a hex color string.
+func formatHexColor(r, g, b int) string {
+	// Use fmt-style formatting with zero-padding to ensure 6 hex digits.
+	hex := strconv.FormatInt(int64(r<<16|g<<8|b), 16)
+	for len(hex) < 6 {
+		hex = "0" + hex
+	}
+	return "#" + strings.ToUpper(hex)
 }
 
 // ThemeColor returns a color from the theme by index.

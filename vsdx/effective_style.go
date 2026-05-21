@@ -394,17 +394,38 @@ func resolveColorValue(s *Shape, value string) string {
 
 // resolveThemeColor resolves a color from theme/QuickStyle settings.
 func (s *Shape) resolveThemeColor(cellName string) string {
-	qs := s.QuickStyle()
-	if qs == nil {
-		return ""
-	}
-
 	vis := s.Page.vis
 	if vis == nil {
 		return ""
 	}
 	theme := vis.Theme()
 	if theme == nil {
+		return ""
+	}
+
+	// For LineColor, first try to resolve via QuickStyleLineMatrix + lnStyleLst
+	if cellName == "LineColor" {
+		lineMatrixIdx := s.resolveQuickStyleLineMatrix()
+
+		// Handle special value 100 which means "use variation-based index"
+		// Per MS-VSDX, QSLM=100 maps to the line style based on embellishment/variation.
+		// Common default is index 3 (which has lt1 with shade, giving gray stroke).
+		if lineMatrixIdx == 100 {
+			// For non-connector shapes (QuickStyleType != 0), use the variation-based lineIdx.
+			// Default to index 3 which is typically the standard themed line style.
+			lineMatrixIdx = 3
+		}
+
+		if lineMatrixIdx >= 0 && lineMatrixIdx < len(theme.LineStyles) {
+			if color := theme.LineStyles[lineMatrixIdx].Color; color != "" {
+				return color
+			}
+		}
+	}
+
+	// Fall back to QuickStyle color indices
+	qs := s.QuickStyle()
+	if qs == nil {
 		return ""
 	}
 
@@ -482,14 +503,14 @@ func (s *Shape) resolveQuickStyleLineMatrix() int {
 		}
 	}
 
-	// Check LineStyle reference for stylesheet
+	// Check LineStyle reference for stylesheet (with inheritance)
 	if s.xml != nil && s.Page != nil && s.Page.vis != nil {
 		// First check master's LineStyle attribute
 		master := s.MasterShape()
 		if master != nil && master.xml != nil {
 			if lineStyleID := master.xml.SelectAttrValue("LineStyle", ""); lineStyleID != "" {
 				if ss := s.Page.vis.StyleSheetByID(lineStyleID); ss != nil {
-					if v := ss.CellValue("QuickStyleLineMatrix"); v != "" {
+					if v := ss.CellValueWithInheritance("QuickStyleLineMatrix"); v != "" {
 						return int(toFloat(v))
 					}
 				}
@@ -499,7 +520,7 @@ func (s *Shape) resolveQuickStyleLineMatrix() int {
 		// Then check shape's own LineStyle
 		if lineStyleID := s.xml.SelectAttrValue("LineStyle", ""); lineStyleID != "" {
 			if ss := s.Page.vis.StyleSheetByID(lineStyleID); ss != nil {
-				if v := ss.CellValue("QuickStyleLineMatrix"); v != "" {
+				if v := ss.CellValueWithInheritance("QuickStyleLineMatrix"); v != "" {
 					return int(toFloat(v))
 				}
 			}
