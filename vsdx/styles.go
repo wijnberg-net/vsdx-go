@@ -33,7 +33,11 @@ func (v *VisioFile) StyleSheets() []*StyleSheet {
 		return nil
 	}
 
-	styleSheets := v.documentXML.FindElement("StyleSheets")
+	// Use //StyleSheets path or Root().SelectElement for proper lookup
+	styleSheets := v.documentXML.FindElement("//StyleSheets")
+	if styleSheets == nil && v.documentXML.Root() != nil {
+		styleSheets = v.documentXML.Root().SelectElement("StyleSheets")
+	}
 	if styleSheets == nil {
 		return nil
 	}

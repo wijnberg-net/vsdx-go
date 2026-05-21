@@ -185,17 +185,13 @@ func collectArrowMarkers(shapes []*vsdx.Shape) map[string]int {
 }
 
 func collectShapeArrows(shape *vsdx.Shape, markers map[string]int) {
-	// Check for begin arrow
-	if v := shape.CellValue("BeginArrow"); v != "" {
-		if arrowType, err := strconv.Atoi(v); err == nil && arrowType > 0 {
-			markers[fmt.Sprintf("arrow-start-%d", arrowType)] = arrowType
-		}
+	// Use ComputeEffectiveStyle to resolve arrows through theme
+	es := shape.ComputeEffectiveStyle()
+	if es.BeginArrow > 0 {
+		markers[fmt.Sprintf("arrow-start-%d", es.BeginArrow)] = es.BeginArrow
 	}
-	// Check for end arrow
-	if v := shape.CellValue("EndArrow"); v != "" {
-		if arrowType, err := strconv.Atoi(v); err == nil && arrowType > 0 {
-			markers[fmt.Sprintf("arrow-end-%d", arrowType)] = arrowType
-		}
+	if es.EndArrow > 0 {
+		markers[fmt.Sprintf("arrow-end-%d", es.EndArrow)] = es.EndArrow
 	}
 	// Check children
 	for _, child := range shape.ChildShapes() {
@@ -631,17 +627,14 @@ func renderGeometry(shape *vsdx.Shape, scale float64, prec int) string {
 			strokeAttr = "none"
 		}
 
-		// Check for arrow markers
+		// Check for arrow markers using ComputeEffectiveStyle (resolves theme arrows)
+		es := shape.ComputeEffectiveStyle()
 		var markerAttrs string
-		if v := shape.CellValue("BeginArrow"); v != "" {
-			if arrowType, err := strconv.Atoi(v); err == nil && arrowType > 0 {
-				markerAttrs += fmt.Sprintf(` marker-start="url(#arrow-start-%d)"`, arrowType)
-			}
+		if es.BeginArrow > 0 {
+			markerAttrs += fmt.Sprintf(` marker-start="url(#arrow-start-%d)"`, es.BeginArrow)
 		}
-		if v := shape.CellValue("EndArrow"); v != "" {
-			if arrowType, err := strconv.Atoi(v); err == nil && arrowType > 0 {
-				markerAttrs += fmt.Sprintf(` marker-end="url(#arrow-end-%d)"`, arrowType)
-			}
+		if es.EndArrow > 0 {
+			markerAttrs += fmt.Sprintf(` marker-end="url(#arrow-end-%d)"`, es.EndArrow)
 		}
 
 		svg.WriteString(fmt.Sprintf(`    <path d="%s" fill="%s" stroke="%s" stroke-width="%s"%s/>`,

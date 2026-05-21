@@ -9,11 +9,23 @@ import (
 
 // Theme represents the visual theme applied to a Visio document.
 type Theme struct {
-	Name     string
-	Colors   ThemeColors
-	Fonts    ThemeFonts
-	Effects  ThemeEffects
-	Variants []ThemeVariant
+	Name               string
+	Colors             ThemeColors
+	Fonts              ThemeFonts
+	Effects            ThemeEffects
+	Variants           []ThemeVariant
+	ConnectorLineStyles []ConnectorLineStyle // Connector arrow/line style presets
+}
+
+// ConnectorLineStyle represents a connector line style from the theme.
+// These are indexed by QuickStyleLineMatrix.
+type ConnectorLineStyle struct {
+	BeginArrow     int // Begin arrow type (0=none, 1-45=types)
+	EndArrow       int // End arrow type
+	BeginArrowSize int // Begin arrow size (0-6)
+	EndArrowSize   int // End arrow size
+	LinePattern    int // Line pattern (1=solid, etc.)
+	Rounding       float64
 }
 
 // ThemeColors holds the color palette from the theme.
@@ -137,6 +149,9 @@ func (v *VisioFile) Theme() *Theme {
 
 	// Parse theme variants (from Visio-specific elements).
 	theme.Variants = parseThemeVariants(v, themeDoc)
+
+	// Parse connector line styles (for arrow resolution).
+	theme.ConnectorLineStyles = parseConnectorLineStyles(themeDoc)
 
 	return theme
 }
@@ -414,6 +429,68 @@ func parseVariantColor(parent *etree.Element, name string) string {
 	}
 
 	return ""
+}
+
+// parseConnectorLineStyles extracts connector line styles from the theme.
+// These define arrow types for connectors based on QuickStyleLineMatrix.
+// Path: //vt:lineStyles/vt:fmtConnectorSchemeLineStyles/vt:lineStyle/vt:lineEx
+func parseConnectorLineStyles(themeDoc *etree.Document) []ConnectorLineStyle {
+	var styles []ConnectorLineStyle
+
+	// Find the connector line styles section
+	lineStyles := themeDoc.FindElement("//vt:fmtConnectorSchemeLineStyles")
+	if lineStyles == nil {
+		// Try without namespace prefix
+		lineStyles = themeDoc.FindElement("//fmtConnectorSchemeLineStyles")
+	}
+	if lineStyles == nil {
+		return styles
+	}
+
+	// Parse each lineStyle element
+	for _, ls := range lineStyles.SelectElements("vt:lineStyle") {
+		style := ConnectorLineStyle{
+			BeginArrowSize: 2, // default
+			EndArrowSize:   2, // default
+			LinePattern:    1, // solid
+		}
+
+		// Find the lineEx child which contains the actual values
+		lineEx := ls.FindElement("vt:lineEx")
+		if lineEx == nil {
+			lineEx = ls.FindElement("lineEx")
+		}
+		if lineEx != nil {
+			// start = begin arrow type
+			if v := lineEx.SelectAttrValue("start", ""); v != "" {
+				style.BeginArrow = int(toFloat(v))
+			}
+			// end = end arrow type
+			if v := lineEx.SelectAttrValue("end", ""); v != "" {
+				style.EndArrow = int(toFloat(v))
+			}
+			// startSize = begin arrow size
+			if v := lineEx.SelectAttrValue("startSize", ""); v != "" {
+				style.BeginArrowSize = int(toFloat(v))
+			}
+			// endSize = end arrow size
+			if v := lineEx.SelectAttrValue("endSize", ""); v != "" {
+				style.EndArrowSize = int(toFloat(v))
+			}
+			// pattern = line pattern
+			if v := lineEx.SelectAttrValue("pattern", ""); v != "" {
+				style.LinePattern = int(toFloat(v))
+			}
+			// rndg = rounding
+			if v := lineEx.SelectAttrValue("rndg", ""); v != "" {
+				style.Rounding = toFloat(v)
+			}
+		}
+
+		styles = append(styles, style)
+	}
+
+	return styles
 }
 
 // ThemeColor returns a color from the theme by index.

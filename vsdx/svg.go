@@ -109,7 +109,23 @@ type markerRef struct {
 // ShapeToSVG converts a Visio shape (typically a master shape) to SVG bytes.
 // The shape's geometry sections are converted to SVG paths with styling.
 // Group shapes recursively include all child shape geometry.
+// This is the canonical entry point using the RenderTree architecture.
 func ShapeToSVG(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
+	o := &SVGOptions{
+		Width:     100,
+		Height:    100,
+		Precision: 2,
+	}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	return EmitRenderTreeWithResult(shape, o.Width, o.Height, o.Precision, o.BrandColor)
+}
+
+// ShapeToSVGLegacy converts a Visio shape using the legacy renderer.
+// This is kept for comparison and validation purposes.
+func ShapeToSVGLegacy(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
 	o := &SVGOptions{
 		Width:     100,
 		Height:    100,
@@ -362,6 +378,9 @@ func renderShapeText(ss renderableShape, parent *Shape, scaleX, scaleY float64, 
 		return ""
 	}
 
+	// Compute effective style for text properties.
+	es := s.ComputeEffectiveStyle()
+
 	// Escape text for XML.
 	text = escapeXML(text)
 
@@ -399,12 +418,11 @@ func renderShapeText(ss renderableShape, parent *Shape, scaleX, scaleY float64, 
 		vertAlign = int(toFloat(vertAlignStr))
 	}
 
-	// Get horizontal alignment from paragraph: 0=left, 1=center, 2=right, 3=justify.
-	// Default is 1 (center) when not specified.
-	horzAlignStr := s.CellValue("Para.HorzAlign")
-	horzAlign := 1 // default to center
-	if horzAlignStr != "" {
-		horzAlign = int(toFloat(horzAlignStr))
+	// Horizontal alignment from EffectiveStyle (already resolved).
+	// 0=left, 1=center, 2=right, 3=justify.
+	horzAlign := es.TextAlign
+	if horzAlign == 0 && s.CellValue("Para.HorzAlign") == "" {
+		horzAlign = 1 // default to center when not specified
 	}
 
 	// Get margins.
@@ -452,35 +470,28 @@ func renderShapeText(ss renderableShape, parent *Shape, scaleX, scaleY float64, 
 		baseline = "alphabetic"
 	}
 
-	// Get font size from Character section (in inches).
-	fontSize := s.TextSize()
-	if fontSize == 0 {
-		fontSize = 12.0 / 72.0 // Default 12pt in inches
-	}
-	// Scale down font size slightly to better match Visio rendering.
-	// Visio's text rendering appears to use tighter metrics than SVG defaults.
-	fontSizePx := fontSize * ((scaleX + scaleY) / 2) * 0.9
+	// Font size from EffectiveStyle (in points, convert to SVG units).
+	// Scale down slightly to better match Visio rendering.
+	fontSizePx := (es.FontSize / 72.0) * ((scaleX + scaleY) / 2) * 0.9
 
-	// Get text color.
-	textColor := resolveColor(s.TextColor())
-	if textColor == "" {
-		// If no explicit text color, check if we need white text for contrast
-		// against a dark fill (common in themed shapes)
-		fillColor := resolveColor(s.FillColor())
-		if fillColor != "" && isDarkColor(fillColor) {
+	// Text color from EffectiveStyle.
+	textColor := es.TextColor
+	if textColor == "" || textColor == "#000000" {
+		// Check if we need white text for contrast against a dark fill.
+		if es.FillForegnd != "" && isDarkColor(es.FillForegnd) {
 			textColor = "#FFFFFF"
-		} else {
+		} else if textColor == "" {
 			textColor = "#000000"
 		}
 	}
 
-	// Get font weight and style.
+	// Font weight and style from EffectiveStyle.
 	fontWeight := "normal"
-	if s.CellValue("Char.Style") == "17" || s.CellValue("Char.Style") == "1" {
+	if es.Bold {
 		fontWeight = "bold"
 	}
 	fontStyle := "normal"
-	if s.CellValue("Char.Style") == "18" || s.CellValue("Char.Style") == "2" {
+	if es.Italic {
 		fontStyle = "italic"
 	}
 
@@ -801,6 +812,9 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		return svgRenderResult{}
 	}
 
+	// Compute effective style ONCE - all rendering decisions derive from this.
+	es := s.ComputeEffectiveStyle()
+
 	// Check if this is an ellipse-only geometry (e.g., cylinder top lid).
 	// For such shapes, we suppress the stroke because it would create an ugly
 	// line cutting through the body when the ellipse overlays another shape.
@@ -837,8 +851,8 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 	numRows := len(sortedRows)
 
 	// Check if shape has begin/end arrows - needed for direction-establishing LineTo stubs.
-	hasBeginArrow := int(toFloat(s.CellValue("BeginArrow"))) > 0
-	hasEndArrow := int(toFloat(s.CellValue("EndArrow"))) > 0
+	hasBeginArrow := es.BeginArrow > 0
+	hasEndArrow := es.EndArrow > 0
 
 	// Local coordinate transform that handles negative-height shapes correctly.
 	// For normal shapes: Y flips from bottom-up (Visio) to top-down (SVG).
@@ -1355,76 +1369,42 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		return svgRenderResult{}
 	}
 
-	// Build style attributes.
-	fill := resolveColor(s.FillColor())
-	stroke := resolveColor(s.LineColor())
-	lineWeight := s.LineWeight()
+	// Build style attributes using EffectiveStyle - all resolution is done.
+	fill := es.EffectiveFillColor()
+	stroke := es.EffectiveLineColor()
+	linePatternInt := es.LinePattern
 
-	// Resolve themed line color for connectors and shapes without explicit LineColor.
-	// Connectors (shapes with BeginX/EndX) typically use theme's Accent1 color.
-	if stroke == "" {
-		// Try QuickStyle color first
-		if qsColor := s.QuickStyleLineColor(); qsColor != "" {
-			stroke = qsColor
-		} else if s.CellValue("BeginX") != "" {
-			// Connector shape - use theme Accent1 as default
-			if vis := s.Page.vis; vis != nil {
-				if theme := vis.Theme(); theme != nil && theme.Colors.Accent1 != "" {
-					stroke = theme.Colors.Accent1
-				}
-			}
-		}
-	}
 	var styleAttrs []string
 	var gradientID string
 
-	// Check for gradient fill.
+	// Check for gradient fill (requires generating SVG defs).
 	gradient := s.FillGradient()
-	if gradient != nil && !noFill {
-		// Generate unique gradient ID based on shape ID.
+	if gradient != nil && !noFill && es.FillPattern != 0 {
 		gradientID = fmt.Sprintf("grad_%s", s.ID)
 		fill = fmt.Sprintf("url(#%s)", gradientID)
 	} else {
-		// Visio default: when FillForegnd is unresolvable but the shape has
-		// an explicit FillPattern (solid) or FillForegndTrans, apply the Visio
-		// default color index 0 (black) — the shape intends to be filled.
-		fillPattern := s.CellValue("FillPattern")
-		if fill == "" {
-			if fillPattern == "1" || s.CellValue("FillForegndTrans") != "" {
-				fill = "#000000"
-			}
-		}
-
-		// FillPattern=0 means "no fill" regardless of FillForegnd value.
-		if noFill || fill == "" || fillPattern == "0" {
+		// Override fill for geometry visibility flags.
+		if noFill {
 			fill = "none"
 		}
 
-		// For multi-geometry shapes (like icon shapes with background + foreground),
-		// secondary geometries often represent circular backgrounds that should be white
-		// to contrast with the colored background rectangle. This handles cases like
-		// Azure Web Role where the globe circle (geometry 1) should be white.
+		// For multi-geometry shapes, secondary geometries may need color inversion
+		// to contrast with the background (e.g., Azure Web Role globe circle).
 		if ss.totalGeoms > 1 && ss.geomIndex > 0 && fill != "none" && fill != "" && isDarkColor(fill) {
 			fill = "#FFFFFF"
-			// Use the original fill color as stroke for better definition
 			if stroke == "" || stroke == "none" || !isDarkColor(stroke) {
-				stroke = resolveColor(s.FillColor())
+				stroke = es.FillForegnd
 			}
 		}
 	}
 
-	// LinePattern=0 means "no line" regardless of other line properties.
-	linePattern := s.CellValue("LinePattern")
-	linePatternInt := int(toFloat(linePattern))
-	if noLine || linePattern == "0" {
+	// Override stroke for geometry visibility flags.
+	if noLine {
 		stroke = "none"
 	} else if isEllipseOnly && fill != "none" && fill != "" {
 		// For ellipse-only geometries (e.g., cylinder top lid), use a white stroke
 		// to create the 3D highlight effect that Visio renders around the ellipse.
 		stroke = "#FFFFFF"
-	} else if stroke == "" {
-		// Default to black stroke when no explicit color is set (Visio default behavior)
-		stroke = "#000000"
 	}
 
 	// Track colors for brand detection.
@@ -1435,28 +1415,22 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		colorFreq[strings.ToUpper(stroke)]++
 	}
 
-	// Scale line weight.
-	// Use non-scaling stroke for consistent visual weight across different shape sizes.
-	// The stroke width is in screen units when vector-effect="non-scaling-stroke" is used.
-	strokeWidth := lineWeight * 72 // Convert inches to points (screen units)
+	// Stroke width from EffectiveStyle (already in points).
+	strokeWidth := es.LineWeight
 	if strokeWidth <= 0 && stroke != "none" {
 		strokeWidth = 2.25 // Default Visio connector stroke weight
 	}
 	// For ellipse-only shapes (cylinder caps), ensure the white highlight stroke is visible.
 	if isEllipseOnly && stroke == "#FFFFFF" {
-		minHighlightWidth := 2.0 // 2 SVG units for visible highlight
+		minHighlightWidth := 2.0
 		if strokeWidth < minHighlightWidth {
 			strokeWidth = minHighlightWidth
 		}
 	}
 
-	// Fill opacity.
-	fillTrans := s.CellValue("FillForegndTrans")
-	if fillTrans != "" {
-		transVal := toFloat(fillTrans)
-		if transVal > 0 {
-			styleAttrs = append(styleAttrs, fmt.Sprintf(`fill-opacity="%s"`, fmtPrec(1-transVal, o.Precision)))
-		}
+	// Fill opacity from EffectiveStyle.
+	if es.FillForegndTrans > 0 && es.FillForegndTrans < 1.0 {
+		styleAttrs = append(styleAttrs, fmt.Sprintf(`fill-opacity="%s"`, fmtPrec(es.EffectiveFillOpacity(), o.Precision)))
 	}
 
 	// Line pattern (dash array).
@@ -1467,26 +1441,12 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		}
 	}
 
-	// Arrow markers.
+	// Arrow markers from EffectiveStyle (already resolved through inheritance chain).
 	var markers []markerRef
-	beginArrow := int(toFloat(s.CellValue("BeginArrow")))
-	endArrow := int(toFloat(s.CellValue("EndArrow")))
-	beginArrowSize := int(toFloat(s.CellValue("BeginArrowSize")))
-	endArrowSize := int(toFloat(s.CellValue("EndArrowSize")))
-
-	// Default arrows for connector shapes. Visio themes typically apply end arrows to connectors.
-	isConnector := fill == "none" && s.CellValue("BeginX") != ""
-	if isConnector && endArrow == 0 {
-		endArrow = 13 // Filled triangle arrow
-	}
-
-	// Default to medium size (2) for consistent appearance.
-	if beginArrow > 0 && beginArrowSize == 0 {
-		beginArrowSize = 2
-	}
-	if endArrow > 0 && endArrowSize == 0 {
-		endArrowSize = 2
-	}
+	beginArrow := es.BeginArrow
+	endArrow := es.EndArrow
+	beginArrowSize := es.BeginArrowSize
+	endArrowSize := es.EndArrowSize
 
 	if stroke != "none" && beginArrow > 0 {
 		key := arrowMarkerKey(beginArrow, beginArrowSize, stroke, false)
@@ -1511,12 +1471,15 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		styleAttrs = append(styleAttrs, fmt.Sprintf(`marker-end="url(#%s)"`, key))
 	}
 
-	// Shadow support.
+	// Shadow support using EffectiveStyle.
 	var shadowID string
-	shadow := s.ShapeShadow()
-	if shadow != nil {
-		shadowID = fmt.Sprintf("shadow_%s", s.ID)
-		styleAttrs = append(styleAttrs, fmt.Sprintf(`filter="url(#%s)"`, shadowID))
+	var shadow *Shadow
+	if es.HasShadow() {
+		shadow = s.ShapeShadow()
+		if shadow != nil {
+			shadowID = fmt.Sprintf("shadow_%s", s.ID)
+			styleAttrs = append(styleAttrs, fmt.Sprintf(`filter="url(#%s)"`, shadowID))
+		}
 	}
 
 	// Build the extra attributes string.
@@ -1525,24 +1488,12 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		extraAttrs = " " + strings.Join(styleAttrs, " ")
 	}
 
-	// With refX=0, arrow back is at attachment point and tip extends forward.
-	// Shorten path so line ends before arrow, arrow tip reaches original endpoint.
-	// Arrow length in pixels = markerWidth * strokeWidth (since markerUnits=strokeWidth)
-	if beginArrow > 0 && pathData != "" {
-		sizeMult := 1.0
-		if beginArrowSize >= 0 && beginArrowSize < len(arrowSizeMultipliers) {
-			sizeMult = arrowSizeMultipliers[beginArrowSize]
-		}
-		arrowLen := 10 * sizeMult * 0.4 * strokeWidth
-		pathData = shortenPathStart(pathData, arrowLen, o.Precision)
+	// Shorten path for arrow markers using pre-computed setbacks from EffectiveStyle.
+	if beginArrow > 0 && pathData != "" && es.BeginArrowSetback > 0 {
+		pathData = shortenPathStart(pathData, es.BeginArrowSetback, o.Precision)
 	}
-	if endArrow > 0 && pathData != "" {
-		sizeMult := 1.0
-		if endArrowSize >= 0 && endArrowSize < len(arrowSizeMultipliers) {
-			sizeMult = arrowSizeMultipliers[endArrowSize]
-		}
-		arrowLen := 10 * sizeMult * 0.4 * strokeWidth
-		pathData = shortenPathEnd(pathData, arrowLen, o.Precision)
+	if endArrow > 0 && pathData != "" && es.EndArrowSetback > 0 {
+		pathData = shortenPathEnd(pathData, es.EndArrowSetback, o.Precision)
 	}
 
 	// Build vector-effect attribute for non-scaling stroke.
