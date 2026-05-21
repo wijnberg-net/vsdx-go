@@ -335,6 +335,56 @@ func renderChildShape(shape *vsdx.Shape, parentHPt, scale float64, prec int) str
 	return svg.String()
 }
 
+// getArrowSetback calculates the path shortening distance for arrow markers.
+// Visio shortens connector paths by the arrow extent so markers fit precisely.
+func getArrowSetback(shape *vsdx.Shape) (beginSetback, endSetback float64) {
+	// Arrow setback formula: setback = arrowExtent * scaleFactor
+	// Default arrow type 4 with size 2: extent=2, scale=3.52, setback=7.04 pts
+	// Arrow size cells: 0=very small, 1=small, 2=medium(default), 3=large, 4=very large, 5=jumbo
+	arrowScales := map[int]float64{
+		0: 2.0,  // very small
+		1: 2.5,  // small
+		2: 3.52, // medium (default)
+		3: 4.5,  // large
+		4: 5.5,  // very large
+		5: 6.5,  // jumbo
+	}
+
+	if v := shape.CellValue("BeginArrow"); v != "" {
+		if arrowType, err := strconv.Atoi(v); err == nil && arrowType > 0 {
+			size := 2 // default
+			if sizeStr := shape.CellValue("BeginArrowSize"); sizeStr != "" {
+				if s, err := strconv.Atoi(sizeStr); err == nil {
+					size = s
+				}
+			}
+			scaleFactor := arrowScales[size]
+			if scaleFactor == 0 {
+				scaleFactor = 3.52
+			}
+			beginSetback = 2.0 * scaleFactor // arrow path extent is 2 units
+		}
+	}
+
+	if v := shape.CellValue("EndArrow"); v != "" {
+		if arrowType, err := strconv.Atoi(v); err == nil && arrowType > 0 {
+			size := 2 // default
+			if sizeStr := shape.CellValue("EndArrowSize"); sizeStr != "" {
+				if s, err := strconv.Atoi(sizeStr); err == nil {
+					size = s
+				}
+			}
+			scaleFactor := arrowScales[size]
+			if scaleFactor == 0 {
+				scaleFactor = 3.52
+			}
+			endSetback = 2.0 * scaleFactor
+		}
+	}
+
+	return beginSetback, endSetback
+}
+
 // renderGeometry renders the geometry sections of a shape.
 func renderGeometry(shape *vsdx.Shape, scale float64, prec int) string {
 	var svg strings.Builder
@@ -347,6 +397,9 @@ func renderGeometry(shape *vsdx.Shape, scale float64, prec int) string {
 	if height == 0 {
 		height = 0.001
 	}
+
+	// Calculate arrow setback for connectors
+	beginSetback, endSetback := getArrowSetback(shape)
 
 	// Get fill and stroke colors
 	fillColor := shape.FillColor()
@@ -378,9 +431,36 @@ func renderGeometry(shape *vsdx.Shape, scale float64, prec int) string {
 		rows := geom.SortedRows()
 		var prevX, prevY float64
 
-		for _, row := range rows {
+		// For simple line connectors, collect points and apply arrow setback
+		isSimpleLine := len(rows) == 2 && rows[0].RowType() == "MoveTo" && rows[1].RowType() == "LineTo"
+
+		for i, row := range rows {
 			x := row.X() * scale
 			y := (height - row.Y()) * scale
+
+			// Apply arrow setback for simple line connectors
+			if isSimpleLine && (beginSetback > 0 || endSetback > 0) {
+				startX := rows[0].X() * scale
+				startY := (height - rows[0].Y()) * scale
+				endX := rows[1].X() * scale
+				endY := (height - rows[1].Y()) * scale
+
+				dx := endX - startX
+				dy := endY - startY
+				lineLen := math.Sqrt(dx*dx + dy*dy)
+				if lineLen > 0.001 {
+					ux := dx / lineLen // unit vector
+					uy := dy / lineLen
+
+					if i == 0 { // MoveTo - apply begin setback
+						x = startX + ux*beginSetback
+						y = startY + uy*beginSetback
+					} else { // LineTo - apply end setback
+						x = endX - ux*endSetback
+						y = endY - uy*endSetback
+					}
+				}
+			}
 
 			switch row.RowType() {
 			case "MoveTo":
