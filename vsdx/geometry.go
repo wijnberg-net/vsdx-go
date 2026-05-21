@@ -560,14 +560,20 @@ type pathSegment struct {
 	bow            float64 // for ArcTo: arc bulge
 }
 
-// SortedRows returns the geometry rows sorted by IX (index) attribute.
+// SortedRows returns the geometry rows sorted by IX (index) attribute numerically.
 func (g *Geometry) SortedRows() []*GeometryRow {
 	// Collect all indices
 	indices := make([]string, 0, len(g.Rows))
 	for ix := range g.Rows {
 		indices = append(indices, ix)
 	}
-	sort.Strings(indices)
+
+	// Sort numerically (IX values are integers as strings)
+	sort.Slice(indices, func(i, j int) bool {
+		ni, _ := strconv.Atoi(indices[i])
+		nj, _ := strconv.Atoi(indices[j])
+		return ni < nj
+	})
 
 	// Return rows in sorted order
 	rows := make([]*GeometryRow, 0, len(indices))

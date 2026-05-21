@@ -124,6 +124,17 @@ func newShape(xml *etree.Element, parent ShapeParent, page *Page) *Shape {
 		}
 	}
 
+	// If shape has no local geometry but references a master, inherit master's geometries.
+	// Note: MasterShape() works here because masters are loaded before pages.
+	if len(s.Geometries) == 0 {
+		if ms := s.MasterShape(); ms != nil && len(ms.Geometries) > 0 {
+			s.Geometries = ms.Geometries
+			if len(s.Geometries) > 0 {
+				s.Geometry = s.Geometries[0]
+			}
+		}
+	}
+
 	// Get Control section
 	controlSection := xml.FindElement("Section[@N='Control']")
 	if controlSection != nil {

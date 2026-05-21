@@ -5249,6 +5249,43 @@ func TestGeometryBezierRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeometrySortedRowsNumeric(t *testing.T) {
+	// Test that SortedRows sorts numerically, not lexically
+	// (i.e., IX=2 comes before IX=10, not after)
+	vis, _, shapes := buildNetworkTopology(t)
+	defer vis.Close() //nolint:errcheck
+
+	s := shapes[0]
+	geom := s.AddGeometry()
+
+	// Add rows in non-sequential order to simulate inherited geometry
+	// with double-digit indices
+	geom.AddMoveTo(0, 0)                  // IX=1
+	for i := 0; i < 11; i++ {
+		geom.AddLineTo(float64(i+1)*0.1, float64(i+1)*0.1) // IX=2..12
+	}
+
+	rows := geom.SortedRows()
+	if len(rows) < 12 {
+		t.Fatalf("expected at least 12 rows, got %d", len(rows))
+	}
+
+	// Verify rows are in numeric order
+	prevIX := 0
+	for i, row := range rows {
+		ix := 0
+		for _, c := range row.Index() {
+			if c >= '0' && c <= '9' {
+				ix = ix*10 + int(c-'0')
+			}
+		}
+		if ix < prevIX {
+			t.Errorf("row %d: IX=%d is less than previous IX=%d (not sorted numerically)", i, ix, prevIX)
+		}
+		prevIX = ix
+	}
+}
+
 func TestScratchSection(t *testing.T) {
 	vis, err := Open("../tests/test1.vsdx")
 	if err != nil {
