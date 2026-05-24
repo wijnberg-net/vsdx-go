@@ -174,17 +174,9 @@ func renderPageNew(page *vsdx.Page, pageW, pageH float64) (string, error) {
 				lineColor = "#000000"
 			}
 
-			// Get line style from shape
-			linePattern := 1
-			if lp := shape.CellValue("LinePattern"); lp != "" {
-				fmt.Sscanf(lp, "%d", &linePattern)
-			}
-			strokeWidth := 0.75 // default
-			if lw := shape.CellValue("LineWeight"); lw != "" {
-				var w float64
-				fmt.Sscanf(lw, "%f", &w)
-				strokeWidth = w * 72 // inches to points
-			}
+			// Get line style from effective style (already computed above)
+			linePattern := style.LinePattern
+			strokeWidth := style.LineWeight // already in points
 
 			// Generate dash array for line pattern
 			dashArray := ""
@@ -193,26 +185,43 @@ func renderPageNew(page *vsdx.Page, pageW, pageH float64) (string, error) {
 					strokeWidth*7, strokeWidth*5, 0.0, strokeWidth*5)
 			}
 
-			// Check for arrow markers
-			endArrow := shape.CellValue("EndArrow")
-			beginArrow := shape.CellValue("BeginArrow")
-			hasEndArrow := endArrow != "" && endArrow != "0"
-			hasBeginArrow := beginArrow != "" && beginArrow != "0"
+			// Check for arrow markers from effective style
+			endArrow := style.EndArrow
+			beginArrow := style.BeginArrow
+			hasEndArrow := endArrow > 0
+			hasBeginArrow := beginArrow > 0
 
 			if hasEndArrow || hasBeginArrow {
+				// Calculate marker size based on arrow size and stroke width
+				// Same formula as render_tree.go createMarkerDef
+				arrowSizeMultipliers := []float64{0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0}
+				sizeMult := 1.0
+				if style.EndArrowSize >= 0 && style.EndArrowSize < len(arrowSizeMultipliers) {
+					sizeMult = arrowSizeMultipliers[style.EndArrowSize]
+				}
+				baseScale := 0.36 * sizeMult
+				minVisualWidth := 7.0 * sizeMult
+				baseVisualWidth := 10 * baseScale * strokeWidth
+				var markerSize float64
+				if baseVisualWidth >= minVisualWidth {
+					markerSize = 10 * baseScale
+				} else {
+					markerSize = minVisualWidth / strokeWidth
+				}
+
 				// Use path with markers for connectors with arrows
 				markerID := fmt.Sprintf("arrow_%s_%s", strings.ReplaceAll(lineColor, "#", ""), shape.ID)
 
 				// Build marker defs
 				sb.WriteString("<defs>\n")
 				if hasEndArrow {
-					sb.WriteString(fmt.Sprintf(`  <marker id="%s_end" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.36" markerHeight="6.36" markerUnits="strokeWidth" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="%s" stroke="none"/></marker>`,
-						markerID, lineColor))
+					sb.WriteString(fmt.Sprintf(`  <marker id="%s_end" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="%.2f" markerHeight="%.2f" markerUnits="strokeWidth" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="%s" stroke="none"/></marker>`,
+						markerID, markerSize, markerSize, lineColor))
 					sb.WriteString("\n")
 				}
 				if hasBeginArrow {
-					sb.WriteString(fmt.Sprintf(`  <marker id="%s_start" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6.36" markerHeight="6.36" markerUnits="strokeWidth" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="%s" stroke="none"/></marker>`,
-						markerID, lineColor))
+					sb.WriteString(fmt.Sprintf(`  <marker id="%s_start" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="%.2f" markerHeight="%.2f" markerUnits="strokeWidth" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="%s" stroke="none"/></marker>`,
+						markerID, markerSize, markerSize, lineColor))
 					sb.WriteString("\n")
 				}
 				sb.WriteString("</defs>\n")

@@ -589,6 +589,10 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		textX = shapeW / 2
 	}
 
+	// Calculate available width for text wrapping
+	availableWidth := (shapeW - leftMargin - rightMargin) * ((b.scaleX + b.scaleY) / 2)
+	charWidth := fontSizeSVG * 0.45 // approximate character width
+
 	// Visio uses alphabetic baseline positioning with additional line-height padding.
 	// For top-aligned text, add offset to match Visio's text leading.
 	fontSizeInches := fontSizeSVG / 72.0
@@ -605,10 +609,6 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		// Add 0.3×font_size offset (in Visio coordinates, before scaling)
 		textY -= (fontSizeSVG * 0.3) / b.scaleY
 	}
-
-	// Calculate available width for text wrapping
-	availableWidth := (shapeW - leftMargin - rightMargin) * ((b.scaleX + b.scaleY) / 2)
-	charWidth := fontSizeSVG * 0.45 // approximate character width
 
 	// Wrap text to fit within shape width
 	lines := wrapTextLines(strings.TrimSpace(text.Content), availableWidth, charWidth)
@@ -674,18 +674,36 @@ func wrapTextLines(text string, maxWidth, charWidth float64) []string {
 
 		var currentLine strings.Builder
 		currentWidth := 0.0
-		spaceWidth := charWidth
+		spaceWidth := charWidth * 0.6 // spaces are narrower than average chars
 
 		for i, word := range words {
 			wordWidth := float64(len(word)) * charWidth
 
+			// Check if next word is short (like "&") - prefer keeping it with following word
+			keepWithNext := len(word) <= 2 && i < len(words)-1
+
 			if i == 0 {
 				currentLine.WriteString(word)
 				currentWidth = wordWidth
-			} else if currentWidth+spaceWidth+wordWidth <= maxWidth {
+			} else if currentWidth+spaceWidth+wordWidth <= maxWidth && !keepWithNext {
 				currentLine.WriteString(" ")
 				currentLine.WriteString(word)
 				currentWidth += spaceWidth + wordWidth
+			} else if keepWithNext && currentWidth+spaceWidth+wordWidth <= maxWidth {
+				// Short word fits, but check if it + next word would also fit
+				nextWordWidth := float64(len(words[i+1])) * charWidth
+				if currentWidth+spaceWidth+wordWidth+spaceWidth+nextWordWidth <= maxWidth {
+					// Both fit, add this word
+					currentLine.WriteString(" ")
+					currentLine.WriteString(word)
+					currentWidth += spaceWidth + wordWidth
+				} else {
+					// Won't fit with next word, break now to keep short word with next
+					result = append(result, currentLine.String())
+					currentLine.Reset()
+					currentLine.WriteString(word)
+					currentWidth = wordWidth
+				}
 			} else {
 				result = append(result, currentLine.String())
 				currentLine.Reset()
