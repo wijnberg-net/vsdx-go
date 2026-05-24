@@ -351,12 +351,15 @@ func (s *Shape) FillColor() string   { return s.CellValue(CellFillForegnd) }
 // TextColor returns the first text color from the Character section.
 func (s *Shape) TextColor() string {
 	charSection := s.xml.FindElement("Section[@N='Character']")
-	if charSection == nil {
-		return ""
+	if charSection != nil {
+		colorCell := charSection.FindElement("Row/Cell[@N='Color']")
+		if colorCell != nil {
+			return colorCell.SelectAttrValue("V", "")
+		}
 	}
-	colorCell := charSection.FindElement("Row/Cell[@N='Color']")
-	if colorCell != nil {
-		return colorCell.SelectAttrValue("V", "")
+	// Check master shape
+	if master := s.MasterShape(); master != nil {
+		return master.TextColor()
 	}
 	return ""
 }

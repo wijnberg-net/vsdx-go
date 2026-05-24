@@ -55,23 +55,23 @@ type ArrowDef struct {
 }
 
 // visioArrowTypes maps Visio arrow type indices to SVG path definitions.
-// RefX=0 places arrow back at line end; path must be shortened so arrow tip reaches target.
+// RefX=10 places arrow tip at line end (arrow points right, tip at x=10).
 var visioArrowTypes = map[int]ArrowDef{
 	0:  {}, // None
-	1:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},       // Triangle (filled)
-	2:  {Path: "M0 0 L10 5 L0 10 L2 5 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},  // Stealth
-	3:  {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false},        // Triangle (open)
-	4:  {Path: "M0 0 L10 5 M0 10 L10 5", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false},  // Line (open)
-	5:  {Path: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},   // Oval (filled)
-	6:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},  // Diamond (filled)
-	7:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false}, // Diamond (open)
-	8:  {Path: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false},  // Oval (open)
-	9:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},       // Double triangle
-	10: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},       // Triangle 45°
-	13: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},       // Standard arrow
-	14: {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false},        // Open arrow
-	22: {Path: "M0 5 L5 0 L10 5 M0 5 L5 10 L10 5", Width: 10, Height: 10, RefX: 5, RefY: 5, Filled: false}, // Fletching
-	45: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true},       // Filled arrow (fallback)
+	1:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Triangle (filled)
+	2:  {Path: "M0 0 L10 5 L0 10 L2 5 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},  // Stealth
+	3:  {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false},        // Triangle (open)
+	4:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},  // Line arrow (filled triangle in Visio export)
+	5:  {Path: "M10 5 L2 0 L3.4 5 L2 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true}, // Stealth with concave back
+	6:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},  // Diamond (filled)
+	7:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false}, // Diamond (open)
+	8:  {Path: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false},  // Oval (open)
+	9:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Double triangle
+	10: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Triangle 45°
+	13: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Standard arrow
+	14: {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false},        // Open arrow
+	22: {Path: "M0 5 L5 0 L10 5 M0 5 L5 10 L10 5", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false}, // Fletching
+	45: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Filled arrow (fallback)
 }
 
 // arrowSizeMultipliers maps Visio arrow size indices (0-6) to scale multipliers.
@@ -334,8 +334,8 @@ func generateMarkerSVG(m markerRef, precision int) string {
 	}
 
 	// Scale marker size relative to line width.
-	// markerWidth/Height are in stroke-width units. Keep arrows small and proportional.
-	scaleFactor := sizeMult * 0.4
+	// markerWidth/Height are in stroke-width units (markerUnits="strokeWidth").
+	scaleFactor := sizeMult * 0.36
 	w := def.Width * scaleFactor
 	h := def.Height * scaleFactor
 
@@ -361,7 +361,7 @@ func generateMarkerSVG(m markerRef, precision int) string {
 		orient = "auto-start-reverse"
 	}
 
-	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" orient="%s"><path d="%s" fill="%s" stroke="%s"/></marker>`,
+	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" markerUnits="strokeWidth" orient="%s"><path d="%s" fill="%s" stroke="%s"/></marker>`,
 		m.key,
 		fmtPrec(def.Width, precision), fmtPrec(def.Height, precision),
 		fmtPrec(refX, precision), fmtPrec(refY, precision),
@@ -628,6 +628,7 @@ type renderableShape struct {
 	offsetX        float64   // X offset in parent group's coordinate space (inches)
 	offsetY        float64   // Y offset in parent group's coordinate space (inches)
 	localW, localH float64   // shape's own width/height
+	angle          float64   // rotation angle in radians (from Angle cell)
 }
 
 // shapeHasGeometry returns true if the shape has at least one non-empty geometry section.
@@ -719,6 +720,9 @@ func collectRenderableShapes(shape *Shape) []renderableShape {
 					usePageShape = true // Still use page shape for styling
 				}
 
+				// Get child's rotation angle (radians)
+				childAngle := toFloat(child.CellValue("Angle"))
+
 				for i, g := range geoms {
 					if len(g.Rows) == 0 {
 						continue
@@ -732,6 +736,7 @@ func collectRenderableShapes(shape *Shape) []renderableShape {
 						offsetY:    oy,
 						localW:     childW,
 						localH:     childH,
+						angle:      childAngle,
 					}
 					if !usePageShape {
 						rs.shape = child // Ensure page shape for styling
@@ -1502,8 +1507,25 @@ func renderSubShapeInternal(ss renderableShape, parent *Shape, scaleX, scaleY fl
 		vectorEffect = ` vector-effect="non-scaling-stroke"`
 	}
 
+	pathElem := fmt.Sprintf(`  <path d="%s" fill="%s" stroke="%s" stroke-width="%s"%s%s/>`, pathData, fill, stroke, fmtPrec(strokeWidth, o.Precision), vectorEffect, extraAttrs)
+
+	// Apply rotation if the shape has a non-zero angle.
+	// Rotation is around the shape's center. Negate the angle because Visio uses
+	// counter-clockwise positive (Y-up) while SVG uses clockwise positive (Y-down).
+	if ss.angle != 0 {
+		angleDeg := -ss.angle * 180 / math.Pi
+		// Calculate rotation center in SVG coordinates
+		centerX := (ss.offsetX + ss.localW/2) * scaleX
+		centerY := (parentH - ss.offsetY - ss.localH/2) * scaleY
+		pathElem = fmt.Sprintf("  <g transform=\"rotate(%s %s %s)\">\n%s\n  </g>",
+			fmtPrec(angleDeg, o.Precision),
+			fmtPrec(centerX, o.Precision),
+			fmtPrec(centerY, o.Precision),
+			pathElem)
+	}
+
 	return svgRenderResult{
-		pathSVG:     fmt.Sprintf(`  <path d="%s" fill="%s" stroke="%s" stroke-width="%s"%s%s/>`, pathData, fill, stroke, fmtPrec(strokeWidth, o.Precision), vectorEffect, extraAttrs),
+		pathSVG:     pathElem,
 		strokeWidth: strokeWidth,
 		markers:     markers,
 		gradientID:  gradientID,
@@ -1899,9 +1921,11 @@ type nurbsControlPoint struct {
 
 // nurbsData holds parsed NURBS formula data including coordinate type flags.
 type nurbsData struct {
-	xType int                 // 0 = proportional (0-1), 1 = absolute (inches)
-	yType int                 // 0 = proportional (0-1), 1 = absolute (inches)
-	cps   []nurbsControlPoint // interior control points
+	knotLast float64             // parameter domain end (typically != 1.0)
+	degree   int                 // B-spline degree (typically 3 for cubic)
+	xType    int                 // 0 = proportional (0-1), 1 = absolute (inches)
+	yType    int                 // 0 = proportional (0-1), 1 = absolute (inches)
+	cps      []nurbsControlPoint // interior control points
 }
 
 // parseNURBSData extracts data from a NURBS() formula string.
@@ -1928,6 +1952,8 @@ func parseNURBSData(formula string) *nurbsData {
 	}
 
 	// Parse header: knotLast (index 0), degree (index 1), xType (index 2), yType (index 3)
+	knotLast := toFloat(parts[0])
+	degree := int(toFloat(parts[1]))
 	xType := int(toFloat(parts[2]))
 	yType := int(toFloat(parts[3]))
 
@@ -1938,7 +1964,7 @@ func parseNURBSData(formula string) *nurbsData {
 		y := toFloat(parts[i+1])
 		cps = append(cps, nurbsControlPoint{x: x, y: y})
 	}
-	return &nurbsData{xType: xType, yType: yType, cps: cps}
+	return &nurbsData{knotLast: knotLast, degree: degree, xType: xType, yType: yType, cps: cps}
 }
 
 // parseNURBSControlPoints extracts interior control points from a NURBS() formula string.

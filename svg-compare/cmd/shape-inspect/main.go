@@ -53,7 +53,7 @@ func dumpShape(s *vsdx.Shape, depth int, pageHPt float64) {
 	height := s.Height()
 	angle := s.Angle()
 
-	// Compute SVG transform like render_page does
+	// Compute SVG transform (same as library's RenderTreeBuilder)
 	absWidth := width
 	if absWidth < 0 {
 		absWidth = -absWidth

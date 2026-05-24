@@ -240,7 +240,7 @@ func (s *Shape) ResolveStyleValue(cellName string) string {
 		return ""
 	}
 
-	// First check master shape.
+	// First check master shape's direct cell value.
 	if master := s.MasterShape(); master != nil {
 		if v := master.CellValue(cellName); v != "" {
 			return v
@@ -251,13 +251,30 @@ func (s *Shape) ResolveStyleValue(cellName string) string {
 	vis := s.Page.vis
 
 	// Determine which style attribute to use based on cell category.
+	// Check both the page shape and master shape for style references.
 	var styleID string
 	if isLineProperty(cellName) {
 		styleID = s.xml.SelectAttrValue("LineStyle", "")
+		// Also check master shape's style reference
+		if styleID == "" {
+			if master := s.MasterShape(); master != nil && master.xml != nil {
+				styleID = master.xml.SelectAttrValue("LineStyle", "")
+			}
+		}
 	} else if isFillProperty(cellName) {
 		styleID = s.xml.SelectAttrValue("FillStyle", "")
+		if styleID == "" {
+			if master := s.MasterShape(); master != nil && master.xml != nil {
+				styleID = master.xml.SelectAttrValue("FillStyle", "")
+			}
+		}
 	} else if isTextProperty(cellName) {
 		styleID = s.xml.SelectAttrValue("TextStyle", "")
+		if styleID == "" {
+			if master := s.MasterShape(); master != nil && master.xml != nil {
+				styleID = master.xml.SelectAttrValue("TextStyle", "")
+			}
+		}
 	}
 
 	if styleID != "" {

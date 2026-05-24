@@ -40,12 +40,14 @@ type EffectiveStyle struct {
 	ShapeShdwScaleFactor float64 // Scale factor
 
 	// Text properties
-	TextColor   string  // Text color
-	FontSize    float64 // Font size in points
-	FontID      int     // Font table index
-	Bold        bool
-	Italic      bool
-	TextAlign   int // 0=left, 1=center, 2=right
+	TextColor     string  // Text color
+	FontSize      float64 // Font size in points
+	FontID        int     // Font table index
+	Bold          bool
+	Italic        bool
+	Underline     bool
+	Strikethrough bool
+	TextAlign     int // 0=left, 1=center, 2=right
 
 	// Geometry visibility
 	NoLine bool // Hide line
@@ -236,11 +238,18 @@ func (es *EffectiveStyle) resolveTextProperties(s *Shape) {
 		es.FontID = int(toFloat(font))
 	}
 
-	// Style (bold/italic from Style cell bitmask)
+	// Style (bold/italic/underline from Style cell bitmask)
+	// Bit 1=Bold, 2=Italic, 4=Underline
 	if style := s.CellValue("Char.Style"); style != "" {
 		styleVal := int(toFloat(style))
 		es.Bold = (styleVal & 1) != 0
 		es.Italic = (styleVal & 2) != 0
+		es.Underline = (styleVal & 4) != 0
+	}
+
+	// Strikethrough from Character section
+	if strikethru := s.CellValue("Char.Strikethru"); strikethru != "" && strikethru != "0" {
+		es.Strikethrough = true
 	}
 
 	// Paragraph alignment
@@ -284,7 +293,10 @@ func (s *Shape) resolveColorCell(cellName string) (string, string) {
 
 	// 3. Style sheet
 	if v := s.ResolveStyleValue(cellName); v != "" {
-		return resolveColorValue(s, v), "style"
+		if color := resolveColorValue(s, v); color != "" {
+			return color, "style"
+		}
+		// If style value is "Themed" or similar, fall through to theme resolution
 	}
 
 	// 4. Theme/QuickStyle
@@ -312,22 +324,39 @@ func (s *Shape) CellValueLocal(name string) string {
 func (s *Shape) resolveNumericCell(cellName string) float64 {
 	// 1. Local cell
 	if v := s.CellValueLocal(cellName); v != "" {
-		return evaluateCellValue(s, v)
+		val := evaluateCellValue(s, v)
+		if val >= 0 {
+			return val
+		}
+		// If "Themed", fall through to theme resolution
 	}
 
 	// 2. Master shape
 	if master := s.MasterShape(); master != nil {
 		if v := master.CellValueLocal(cellName); v != "" {
-			return evaluateCellValue(master, v)
+			val := evaluateCellValue(master, v)
+			if val >= 0 {
+				return val
+			}
+			// If "Themed", fall through to theme resolution
 		}
 	}
 
 	// 3. Style sheet
 	if v := s.ResolveStyleValue(cellName); v != "" {
-		return evaluateCellValue(s, v)
+		val := evaluateCellValue(s, v)
+		if val >= 0 {
+			return val
+		}
+		// If "Themed", fall through to theme resolution
 	}
 
-	// 4. Theme - handled specially for some cells
+	// 4. Theme - resolve LineWeight from theme line styles
+	if cellName == "LineWeight" {
+		if weight := s.resolveThemeLineWeight(); weight > 0 {
+			return weight
+		}
+	}
 
 	return -1 // Indicates not found
 }
@@ -377,6 +406,11 @@ func evaluateCellValue(s *Shape, value string) float64 {
 func resolveColorValue(s *Shape, value string) string {
 	value = strings.TrimSpace(value)
 
+	// Handle "Themed" keyword - resolve from theme
+	if strings.EqualFold(value, "Themed") {
+		return "" // Signal to caller to try theme resolution
+	}
+
 	// Handle THEMEVAL
 	if strings.HasPrefix(strings.ToUpper(value), "THEMEVAL(") {
 		return s.resolveThemeVal(value)
@@ -421,6 +455,11 @@ func (s *Shape) resolveThemeColor(cellName string) string {
 				return color
 			}
 		}
+
+		// For connectors with no explicit line style, use accent color
+		if s.IsConnector() && theme.Colors.Accent1 != "" {
+			return theme.Colors.Accent1
+		}
 	}
 
 	// Fall back to QuickStyle color indices
@@ -444,6 +483,13 @@ func (s *Shape) resolveThemeColor(cellName string) string {
 	// Map QuickStyle color index to theme color
 	// Per MS-VSDX §2.2.7.4.3: indices 0-8 map to theme colors
 	return s.resolveQuickStyleColor(colorIdx, cellName)
+}
+
+// resolveThemeLineWeight resolves line weight from theme line styles.
+func (s *Shape) resolveThemeLineWeight() float64 {
+	// For themed line weight, use standard 1 point (0.01389 inches)
+	// This matches Visio's default themed connector line width
+	return 0.01389
 }
 
 // resolveThemeArrow resolves arrow type from theme connector properties.
@@ -595,7 +641,8 @@ func computeArrowSetback(arrowType, arrowSize int, lineWeight float64) float64 {
 
 // EffectiveLineColor returns the line color as CSS color.
 func (es *EffectiveStyle) EffectiveLineColor() string {
-	if es.LineColorTrans >= 1.0 || es.NoLine {
+	// LinePattern=0 means no line in Visio
+	if es.LinePattern == 0 || es.LineColorTrans >= 1.0 || es.NoLine {
 		return "none"
 	}
 	return es.LineColor
