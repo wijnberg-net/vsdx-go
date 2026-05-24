@@ -1,6 +1,7 @@
 package vsdx
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -94,12 +95,13 @@ type ThemeEffects struct {
 
 // ThemeVariant represents a theme variant/variation.
 type ThemeVariant struct {
-	Index       int    // variant index (0-3)
-	FillColor   string // primary fill color
-	FillColor2  string // secondary fill color
-	LineColor   string // line color
-	TextColor   string // text color
-	AccentColor string // accent color
+	Index       int      // variant index (0-3)
+	FillColor   string   // primary fill color (varColor1)
+	FillColor2  string   // secondary fill color (varColor2)
+	LineColor   string   // line color (varColor3)
+	TextColor   string   // text color
+	AccentColor string   // accent color (varColor5)
+	VarColors   []string // all 7 varColors (varColor1-7) for indexed lookup
 }
 
 // Theme returns the document's theme, or nil if no theme is defined.
@@ -385,12 +387,19 @@ func parseThemeVariants(vis *VisioFile, themeDoc *etree.Document) []ThemeVariant
 	for i, varScheme := range varSchemes {
 		variant := ThemeVariant{Index: i}
 
-		// Parse variant colors (varColor1 through varColor7).
+		// Parse all variant colors (varColor1 through varColor7).
+		// Store all 7 for indexed lookup (QuickStyleFillColor 200-206 maps to varColor1-7).
+		variant.VarColors = make([]string, 7)
+		for j := 1; j <= 7; j++ {
+			variant.VarColors[j-1] = parseVariantColor(varScheme, fmt.Sprintf("varColor%d", j))
+		}
+
+		// Also store named mappings for convenience.
 		// varColor1 is typically the primary fill, varColor2-7 are accent colors.
-		variant.FillColor = parseVariantColor(varScheme, "varColor1")
-		variant.FillColor2 = parseVariantColor(varScheme, "varColor2")
-		variant.LineColor = parseVariantColor(varScheme, "varColor3")
-		variant.AccentColor = parseVariantColor(varScheme, "varColor5")
+		variant.FillColor = variant.VarColors[0]  // varColor1
+		variant.FillColor2 = variant.VarColors[1] // varColor2
+		variant.LineColor = variant.VarColors[2]  // varColor3
+		variant.AccentColor = variant.VarColors[4] // varColor5
 
 		// Check monotone attribute.
 		if varScheme.SelectAttrValue("monotone", "") == "1" {
@@ -969,6 +978,9 @@ func (s *Shape) QuickStyleFontColor() string {
 // resolveQuickStyleColor resolves a QuickStyle color index through the theme.
 // Per MS-VSDX §2.2.7.4.3, color indices 0-8 map to:
 // 0: dark1, 1: light1, 2: dark2, 3: light2, 4-9: accent1-6
+// Special values:
+// 100-107: Line style colors from lnStyleLst
+// 200-206: Variant colors (varColor1-7) from variationClrScheme
 func (s *Shape) resolveQuickStyleColor(colorIdx int, colorType string) string {
 	vis := s.Page.vis
 	if vis == nil {
@@ -981,6 +993,28 @@ func (s *Shape) resolveQuickStyleColor(colorIdx int, colorType string) string {
 
 	// Get the variation index for variant-specific colors.
 	varIdx := int(toFloat(s.CellValue(CellQuickStyleVariation)))
+
+	// Handle variant color indices 200-206 (varColor1-7).
+	// These map to the VarColors array in the current variant.
+	if colorIdx >= 200 && colorIdx <= 206 {
+		varColorIdx := colorIdx - 200 // 0-6 maps to varColor1-7
+		if varIdx >= 0 && varIdx < len(theme.Variants) {
+			variant := &theme.Variants[varIdx]
+			if varColorIdx < len(variant.VarColors) && variant.VarColors[varColorIdx] != "" {
+				return variant.VarColors[varColorIdx]
+			}
+		}
+		// Fallback: use the first variant if available.
+		if len(theme.Variants) > 0 {
+			variant := &theme.Variants[0]
+			if varColorIdx < len(variant.VarColors) && variant.VarColors[varColorIdx] != "" {
+				return variant.VarColors[varColorIdx]
+			}
+		}
+		return ""
+	}
+
+	// For standard indices, check if variant has specific color for this type.
 	if varIdx >= 0 && varIdx < len(theme.Variants) {
 		variant := &theme.Variants[varIdx]
 		// Check if variant has specific color for this type.
