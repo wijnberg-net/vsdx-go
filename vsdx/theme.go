@@ -18,12 +18,22 @@ type Theme struct {
 	Variants           []ThemeVariant
 	ConnectorLineStyles []ConnectorLineStyle // Connector arrow/line style presets
 	LineStyles          []LineStyleColor      // Non-connector line styles from fmtScheme/lnStyleLst
+	FontStyles          []FontStyleColor      // Font styles from fontStylesGroup (indexed by QuickStyleFontMatrix)
 }
 
 // LineStyleColor represents a resolved line style color from the theme.
 // These are indexed by QuickStyleLineMatrix for non-connector shapes.
 type LineStyleColor struct {
-	Color string // Resolved RGB hex color (e.g., "#C7C8C8")
+	Color       string  // Resolved RGB hex color (e.g., "#C7C8C8"), empty if phClr
+	IsPhClr     bool    // True if this uses placeholder color (shape's QuickStyleLineColor)
+	PhClrTint   float64 // Tint to apply to phClr (0-1, 0=no tint)
+	PhClrShade  float64 // Shade to apply to phClr (0-1, 0=no shade)
+}
+
+// FontStyleColor represents a font style from the theme.
+// These are indexed by QuickStyleFontMatrix.
+type FontStyleColor struct {
+	Color string // Resolved RGB hex color (e.g., "#FEFFFF")
 }
 
 // ConnectorLineStyle represents a connector line style from the theme.
@@ -165,6 +175,9 @@ func (v *VisioFile) Theme() *Theme {
 
 	// Parse non-connector line styles (for line colors).
 	theme.LineStyles = parseLineStyleColors(themeDoc, theme.Colors)
+
+	// Parse font styles (for text colors indexed by QuickStyleFontMatrix).
+	theme.FontStyles = parseFontStyleColors(themeDoc, theme.Colors)
 
 	return theme
 }
@@ -537,10 +550,93 @@ func parseLineStyleColors(themeDoc *etree.Document, colors ThemeColors) []LineSt
 			solidFill = ln.FindElement("solidFill")
 		}
 		if solidFill != nil {
-			style.Color = parseSchemeColor(solidFill, colors)
+			// Check for phClr (placeholder color)
+			schemeClr := solidFill.FindElement("a:schemeClr")
+			if schemeClr == nil {
+				schemeClr = solidFill.FindElement("schemeClr")
+			}
+			if schemeClr != nil && schemeClr.SelectAttrValue("val", "") == "phClr" {
+				style.IsPhClr = true
+				// Capture tint/shade for phClr
+				if tint := schemeClr.FindElement("a:tint"); tint != nil {
+					if v := tint.SelectAttrValue("val", ""); v != "" {
+						style.PhClrTint = toFloat(v) / 100000.0
+					}
+				} else if tint := schemeClr.FindElement("tint"); tint != nil {
+					if v := tint.SelectAttrValue("val", ""); v != "" {
+						style.PhClrTint = toFloat(v) / 100000.0
+					}
+				}
+				if shade := schemeClr.FindElement("a:shade"); shade != nil {
+					if v := shade.SelectAttrValue("val", ""); v != "" {
+						style.PhClrShade = toFloat(v) / 100000.0
+					}
+				} else if shade := schemeClr.FindElement("shade"); shade != nil {
+					if v := shade.SelectAttrValue("val", ""); v != "" {
+						style.PhClrShade = toFloat(v) / 100000.0
+					}
+				}
+			} else {
+				style.Color = parseSchemeColor(solidFill, colors)
+			}
 		}
 
 		styles = append(styles, style)
+	}
+
+	return styles
+}
+
+// parseFontStyleColors extracts font style colors from the theme's fontStylesGroup.
+// These are used for text colors via QuickStyleFontMatrix.
+// Path: //vt:fontStylesGroup/vt:fontStyles/vt:fontProps/vt:color
+func parseFontStyleColors(themeDoc *etree.Document, colors ThemeColors) []FontStyleColor {
+	var styles []FontStyleColor
+
+	// Find fontStyles in fontStylesGroup (not connectorFontStyles).
+	fontStylesGroup := themeDoc.FindElement("//vt:fontStylesGroup")
+	if fontStylesGroup == nil {
+		fontStylesGroup = themeDoc.FindElement("//fontStylesGroup")
+	}
+	if fontStylesGroup == nil {
+		return styles
+	}
+
+	// Get the fontStyles element (not connectorFontStyles).
+	fontStyles := fontStylesGroup.FindElement("vt:fontStyles")
+	if fontStyles == nil {
+		fontStyles = fontStylesGroup.FindElement("fontStyles")
+	}
+	if fontStyles == nil {
+		return styles
+	}
+
+	// Parse each fontProps element.
+	for _, fp := range fontStyles.SelectElements("vt:fontProps") {
+		style := FontStyleColor{}
+
+		// Find the color element.
+		colorElem := fp.FindElement("vt:color")
+		if colorElem == nil {
+			colorElem = fp.FindElement("color")
+		}
+		if colorElem != nil {
+			style.Color = parseSchemeColor(colorElem, colors)
+		}
+
+		styles = append(styles, style)
+	}
+
+	// Also try without vt: namespace.
+	if len(styles) == 0 {
+		for _, fp := range fontStyles.SelectElements("fontProps") {
+			style := FontStyleColor{}
+			colorElem := fp.FindElement("color")
+			if colorElem != nil {
+				style.Color = parseSchemeColor(colorElem, colors)
+			}
+			styles = append(styles, style)
+		}
 	}
 
 	return styles

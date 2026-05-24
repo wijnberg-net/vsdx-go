@@ -221,7 +221,7 @@ func (e *SVGEmitter) emitGeometry(svg *strings.Builder, node *RenderNode) {
 		return
 	}
 
-	// Collect valid paths
+	// Collect valid paths for this node
 	var validPaths []*ResolvedPath
 	for _, path := range node.Geometry {
 		if !path.NoShow && path.D != "" {
@@ -229,32 +229,37 @@ func (e *SVGEmitter) emitGeometry(svg *strings.Builder, node *RenderNode) {
 		}
 	}
 
-	// If multiple paths with same styling, combine into compound path
-	// This creates holes using SVG's evenodd fill rule
-	if len(validPaths) >= 2 && e.canCombinePaths(validPaths) {
-		e.emitCompoundPath(svg, validPaths)
-	} else {
-		// Emit paths individually
-		for _, path := range validPaths {
-			e.emitSinglePath(svg, path)
+	// Helper to emit children
+	emitChildren := func() {
+		for _, child := range node.Children {
+			if child.Angle != 0 {
+				angleDeg := -child.Angle * 180 / math.Pi
+				svg.WriteString(fmt.Sprintf("  <g transform=\"rotate(%s %s %s)\">\n",
+					e.fmtNum(angleDeg), e.fmtNum(child.RotationCenterX), e.fmtNum(child.RotationCenterY)))
+				e.emitGeometry(svg, child)
+				svg.WriteString("  </g>\n")
+			} else {
+				e.emitGeometry(svg, child)
+			}
 		}
 	}
 
-	// Recurse to children
-	for _, child := range node.Children {
-		// Apply rotation transform if child has non-zero angle
-		if child.Angle != 0 {
-			// Negate angle because Visio uses counter-clockwise positive (Y-up)
-			// while SVG uses clockwise positive (Y-down)
-			angleDeg := -child.Angle * 180 / math.Pi
-			svg.WriteString(fmt.Sprintf("  <g transform=\"rotate(%s %s %s)\">\n",
-				e.fmtNum(angleDeg), e.fmtNum(child.RotationCenterX), e.fmtNum(child.RotationCenterY)))
-			e.emitGeometry(svg, child)
-			svg.WriteString("  </g>\n")
+	// Helper to emit this node's paths
+	emitPaths := func() {
+		if len(validPaths) >= 2 && e.canCombinePaths(validPaths) {
+			e.emitCompoundPath(svg, validPaths)
 		} else {
-			e.emitGeometry(svg, child)
+			for _, path := range validPaths {
+				e.emitSinglePath(svg, path)
+			}
 		}
 	}
+
+	// Visio renders children BEFORE parent geometry in groups.
+	// This ensures caps/overlays (parent geometry) appear on top of body shapes (children).
+	// Example: cylinder has body as child and ellipse cap as parent geometry.
+	emitChildren()
+	emitPaths()
 }
 
 // canCombinePaths returns true if all paths have matching fill/stroke styling
@@ -312,6 +317,7 @@ func (e *SVGEmitter) emitCompoundPath(svg *strings.Builder, paths []*ResolvedPat
 	} else {
 		attrs = append(attrs, `stroke-linecap="round"`)
 	}
+	attrs = append(attrs, `stroke-linejoin="round"`)
 	if first.FilterID != "" {
 		attrs = append(attrs, fmt.Sprintf(`filter="url(#%s)"`, first.FilterID))
 	}
@@ -342,6 +348,7 @@ func (e *SVGEmitter) emitSinglePath(svg *strings.Builder, path *ResolvedPath) {
 	} else {
 		attrs = append(attrs, `stroke-linecap="round"`)
 	}
+	attrs = append(attrs, `stroke-linejoin="round"`)
 	if path.MarkerStartID != "" {
 		attrs = append(attrs, fmt.Sprintf(`marker-start="%s"`, path.MarkerStartID))
 	}
@@ -366,19 +373,18 @@ func (e *SVGEmitter) emitText(svg *strings.Builder, node *RenderNode) {
 		t := node.Text
 		content := escapeXML(t.Content)
 
-		// Scale font size appropriately
-		// Text position and font size should already be resolved in the render tree
 		svg.WriteString(fmt.Sprintf(`  <text x="%s" y="%s" text-anchor="%s" dominant-baseline="%s" fill="%s" font-size="%s" font-weight="%s" font-style="%s"`,
 			e.fmtNum(t.X), e.fmtNum(t.Y),
 			t.TextAnchor, t.Baseline,
 			t.Fill, e.fmtNum(t.FontSize),
 			t.FontWeight, t.FontStyle))
 
-		// Text decoration (underline, line-through)
+		if t.FontFamily != "" {
+			svg.WriteString(fmt.Sprintf(` font-family="%s"`, t.FontFamily))
+		}
 		if t.TextDecoration != "" {
 			svg.WriteString(fmt.Sprintf(` text-decoration="%s"`, t.TextDecoration))
 		}
-
 		if t.Transform != "" {
 			svg.WriteString(fmt.Sprintf(` transform="%s"`, t.Transform))
 		}
@@ -388,12 +394,13 @@ func (e *SVGEmitter) emitText(svg *strings.Builder, node *RenderNode) {
 		// Handle multi-line text
 		if len(t.Lines) > 1 {
 			for i, line := range t.Lines {
-				dy := "0"
-				if i > 0 {
-					dy = e.fmtNum(t.LineHeight)
+				if i == 0 {
+					svg.WriteString(fmt.Sprintf(`<tspan x="%s" dy="0">%s</tspan>`,
+						e.fmtNum(t.X), escapeXML(line)))
+				} else {
+					svg.WriteString(fmt.Sprintf(`<tspan x="%s" dy="1.2em">%s</tspan>`,
+						e.fmtNum(t.X), escapeXML(line)))
 				}
-				svg.WriteString(fmt.Sprintf(`<tspan x="%s" dy="%s">%s</tspan>`,
-					e.fmtNum(t.X), dy, escapeXML(line)))
 			}
 		} else {
 			svg.WriteString(content)

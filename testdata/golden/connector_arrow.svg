@@ -2,5 +2,5 @@
   <defs>
     <filter id="shadow_6" x="-54.12%" y="-54.12%" width="208.24%" height="208.24%"><feDropShadow dx="0.12" dy="0.12" stdDeviation="2" flood-color="#5B9BD5" flood-opacity="0.22"/></filter>
   </defs>
-  <path d="M0 3.75C-0 1.69 1.7 -0 3.75 0L96.25 0C98.31 -0 100 1.69 100 3.75L100 71.25C100 73.31 98.3 75 96.25 75L3.75 75C1.69 75 -0 73.31 0 71.25L0 3.75" fill="#FFFFFF" stroke="#5E5E5E" stroke-width="1.35" vector-effect="non-scaling-stroke" stroke-linecap="round" filter="url(#shadow_6)"/>
+  <path d="M0 3.75C0 1.69 1.69 0 3.75 0L96.25 0C98.31 0 100 1.69 100 3.75L100 71.25C100 73.31 98.31 75 96.25 75L3.75 75C1.69 75 0 73.31 0 71.25L0 3.75" fill="#FFFFFF" stroke="#5E5E5E" stroke-width="1.35" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow_6)"/>
 </svg>

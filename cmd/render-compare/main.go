@@ -155,7 +155,7 @@ func renderPageNew(page *vsdx.Page, pageW, pageH float64) (string, error) {
 		shapeH := shape.Height()
 		shapeAngle := shape.Angle()
 
-		// Check if this is a rotated 1D shape (like a divider line)
+		// Check if this is a rotated 1D shape (like a divider line or connector)
 		// These have Height=0 and non-zero Angle, and use BeginX/BeginY for positioning
 		isRotated1D := shapeH == 0 && shapeAngle != 0
 
@@ -166,6 +166,13 @@ func renderPageNew(page *vsdx.Page, pageW, pageH float64) (string, error) {
 			y1 := (pageH - shape.BeginY()) * ppi
 			x2 := shape.EndX() * ppi
 			y2 := (pageH - shape.EndY()) * ppi
+
+			// Get line color from effective style
+			style := shape.ComputeEffectiveStyle()
+			lineColor := style.EffectiveLineColor()
+			if lineColor == "" {
+				lineColor = "#000000"
+			}
 
 			// Get line style from shape
 			linePattern := 1
@@ -186,8 +193,46 @@ func renderPageNew(page *vsdx.Page, pageW, pageH float64) (string, error) {
 					strokeWidth*7, strokeWidth*5, 0.0, strokeWidth*5)
 			}
 
-			sb.WriteString(fmt.Sprintf(`<line x1="%.2f" y1="%.2f" x2="%.2f" y2="%.2f" stroke="#000000" stroke-width="%.2f" %s stroke-linecap="round"/>`,
-				x1, y1, x2, y2, strokeWidth, dashArray))
+			// Check for arrow markers
+			endArrow := shape.CellValue("EndArrow")
+			beginArrow := shape.CellValue("BeginArrow")
+			hasEndArrow := endArrow != "" && endArrow != "0"
+			hasBeginArrow := beginArrow != "" && beginArrow != "0"
+
+			if hasEndArrow || hasBeginArrow {
+				// Use path with markers for connectors with arrows
+				markerID := fmt.Sprintf("arrow_%s_%s", strings.ReplaceAll(lineColor, "#", ""), shape.ID)
+
+				// Build marker defs
+				sb.WriteString("<defs>\n")
+				if hasEndArrow {
+					sb.WriteString(fmt.Sprintf(`  <marker id="%s_end" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6.36" markerHeight="6.36" markerUnits="strokeWidth" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="%s" stroke="none"/></marker>`,
+						markerID, lineColor))
+					sb.WriteString("\n")
+				}
+				if hasBeginArrow {
+					sb.WriteString(fmt.Sprintf(`  <marker id="%s_start" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="6.36" markerHeight="6.36" markerUnits="strokeWidth" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="%s" stroke="none"/></marker>`,
+						markerID, lineColor))
+					sb.WriteString("\n")
+				}
+				sb.WriteString("</defs>\n")
+
+				// Build marker-end/start attributes
+				markerAttrs := ""
+				if hasBeginArrow {
+					markerAttrs += fmt.Sprintf(` marker-start="url(#%s_start)"`, markerID)
+				}
+				if hasEndArrow {
+					markerAttrs += fmt.Sprintf(` marker-end="url(#%s_end)"`, markerID)
+				}
+
+				sb.WriteString(fmt.Sprintf(`<path d="M%.2f %.2fL%.2f %.2f" fill="none" stroke="%s" stroke-width="%.2f" %s stroke-linecap="round"%s/>`,
+					x1, y1, x2, y2, lineColor, strokeWidth, dashArray, markerAttrs))
+			} else {
+				// Simple line without arrows
+				sb.WriteString(fmt.Sprintf(`<line x1="%.2f" y1="%.2f" x2="%.2f" y2="%.2f" stroke="%s" stroke-width="%.2f" %s stroke-linecap="round"/>`,
+					x1, y1, x2, y2, lineColor, strokeWidth, dashArray))
+			}
 			sb.WriteString("\n")
 			continue
 		}

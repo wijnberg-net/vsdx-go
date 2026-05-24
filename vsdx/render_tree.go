@@ -69,6 +69,7 @@ type ResolvedText struct {
 	Content        string
 	X, Y           float64 // position in world coordinates
 	FontSize       float64 // in SVG units
+	FontFamily     string  // font family (e.g., "Calibri, sans-serif")
 	FontWeight     string  // "normal" or "bold"
 	FontStyle      string  // "normal" or "italic"
 	TextDecoration string  // "none", "underline", "line-through", or combined
@@ -244,18 +245,12 @@ func (b *RenderTreeBuilder) buildNodeWithOffset(shape *Shape, zOrder int, parent
 			if childAngle != 0 {
 				childNode.Angle = childAngle
 				// Calculate rotation center in SVG coordinates
-				// For 2D shapes: center is at offset + half width/height
-				// For 1D shapes (connectors with Height=0): use actual shape dimensions
-				cw := math.Abs(child.Width())
-				ch := math.Abs(child.Height())
-				// Only use parent dimensions for truly zero-width shapes (not connectors)
-				// Connectors have Height=0 but valid Width, so don't substitute parent height
-				if cw == 0 {
-					cw = childW
-				}
-				// For 1D connectors (Height=0), keep ch=0 so rotation is around the line
-				childNode.RotationCenterX = (childOffsetX + cw/2) * b.scaleX
-				childNode.RotationCenterY = (b.rootH - childOffsetY - ch/2) * b.scaleY
+				// Rotation is around the LocPin point, which is at (LocPinX, LocPinY) in local coords.
+				// After positioning, LocPin is at (childOffsetX + LocPinX, childOffsetY + LocPinY).
+				locPinX := child.LocX()
+				locPinY := child.LocY()
+				childNode.RotationCenterX = (childOffsetX + locPinX) * b.scaleX
+				childNode.RotationCenterY = (b.rootH - childOffsetY - locPinY) * b.scaleY
 			}
 
 			node.Children = append(node.Children, childNode)
@@ -346,13 +341,13 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 		if result.MarkerStart != "" {
 			markerID := extractMarkerID(result.MarkerStart)
 			if markerID != "" {
-				node.Markers[markerID] = b.createMarkerDef(style.BeginArrow, style.BeginArrowSize, result.Stroke, false)
+				node.Markers[markerID] = b.createMarkerDef(style.BeginArrow, style.BeginArrowSize, result.Stroke, result.StrokeWidth, false)
 			}
 		}
 		if result.MarkerEnd != "" {
 			markerID := extractMarkerID(result.MarkerEnd)
 			if markerID != "" {
-				node.Markers[markerID] = b.createMarkerDef(style.EndArrow, style.EndArrowSize, result.Stroke, true)
+				node.Markers[markerID] = b.createMarkerDef(style.EndArrow, style.EndArrowSize, result.Stroke, result.StrokeWidth, true)
 			}
 		}
 
@@ -404,7 +399,7 @@ func extractMarkerID(url string) string {
 	return ""
 }
 
-func (b *RenderTreeBuilder) createMarkerDef(arrowType, arrowSize int, color string, isEnd bool) *MarkerDef {
+func (b *RenderTreeBuilder) createMarkerDef(arrowType, arrowSize int, color string, strokeWidth float64, isEnd bool) *MarkerDef {
 	def, ok := visioArrowTypes[arrowType]
 	if !ok || def.Path == "" {
 		def = visioArrowTypes[1] // fallback to triangle
@@ -415,20 +410,43 @@ func (b *RenderTreeBuilder) createMarkerDef(arrowType, arrowSize int, color stri
 		sizeMult = arrowSizeMultipliers[arrowSize]
 	}
 
-	scaleFactor := sizeMult * 0.36 // Halved because markerUnits="strokeWidth" multiplies by stroke width
+	// Apply arrow length multiplier (e.g., type 13 is 1.5x longer than type 4)
+	lengthMult := def.LengthMult
+	if lengthMult == 0 {
+		lengthMult = 1.0
+	}
+
+	// Base dimensions in strokeWidth units
+	// Standard scale gives 3.6 strokeWidth units, but we want minimum 7 visual units
+	baseScale := 0.36 * sizeMult
+	minVisualWidth := 7.0 * sizeMult * lengthMult  // minimum visual size
+	baseVisualWidth := def.Width * baseScale * lengthMult * strokeWidth
+
+	// Calculate scale factor ensuring minimum visual size
+	var scaleFactor float64
+	if baseVisualWidth >= minVisualWidth || strokeWidth == 0 {
+		scaleFactor = baseScale
+	} else {
+		// For thin strokes, use larger marker to meet minimum visual size
+		scaleFactor = minVisualWidth / (def.Width * lengthMult * strokeWidth)
+	}
+
 	pos := "start"
 	if isEnd {
 		pos = "end"
 	}
 
+	// Include stroke width in marker ID since dimensions depend on it
+	swKey := fmt.Sprintf("%.0f", strokeWidth*10) // e.g., "30" for 3pt, "10" for 1pt
+
 	return &MarkerDef{
-		ID:        fmt.Sprintf("arrow_%d_%d_%s_%s", arrowType, arrowSize, strings.TrimPrefix(color, "#"), pos),
+		ID:        fmt.Sprintf("arrow_%d_%d_%s_%s_%s", arrowType, arrowSize, strings.TrimPrefix(color, "#"), swKey, pos),
 		ArrowType: arrowType,
 		Size:      arrowSize,
 		Color:     color,
 		IsEnd:     isEnd,
 		Path:      def.Path,
-		Width:     def.Width * scaleFactor,
+		Width:     def.Width * scaleFactor * lengthMult,
 		Height:    def.Height * scaleFactor,
 		RefX:      def.RefX,
 		RefY:      def.RefY,
@@ -455,6 +473,7 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 	text := &ResolvedText{
 		Content:    shape.Text(),
 		FontSize:   fontSizeSVG,
+		FontFamily: "", // Use default font for better cross-platform rendering
 		FontWeight: "normal",
 		FontStyle:  "normal",
 		Fill:       textColor,
@@ -516,11 +535,24 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		horzAlign = 1 // default to center
 	}
 
-	// Margins
-	leftMargin := toFloat(shape.CellValue("LeftMargin"))
-	rightMargin := toFloat(shape.CellValue("RightMargin"))
-	topMargin := toFloat(shape.CellValue("TopMargin"))
-	bottomMargin := toFloat(shape.CellValue("BottomMargin"))
+	// Margins - MS-VSDX default is 4pt = 0.0555556 inches
+	const defaultMargin = 4.0 / 72.0 // 4pt in inches
+	leftMargin := defaultMargin
+	rightMargin := defaultMargin
+	topMargin := defaultMargin
+	bottomMargin := defaultMargin
+	if v := shape.CellValue("LeftMargin"); v != "" {
+		leftMargin = toFloat(v)
+	}
+	if v := shape.CellValue("RightMargin"); v != "" {
+		rightMargin = toFloat(v)
+	}
+	if v := shape.CellValue("TopMargin"); v != "" {
+		topMargin = toFloat(v)
+	}
+	if v := shape.CellValue("BottomMargin"); v != "" {
+		bottomMargin = toFloat(v)
+	}
 
 	// Calculate text position in shape local coordinates
 	textX := txtPinX + leftMargin
@@ -557,11 +589,14 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		textX = shapeW / 2
 	}
 
-	// Visio uses alphabetic baseline positioning. For middle-aligned text,
-	// it positions the baseline ~0.3×font_size below the visual center.
+	// Visio uses alphabetic baseline positioning with additional line-height padding.
+	// For top-aligned text, add offset to match Visio's text leading.
+	fontSizeInches := fontSizeSVG / 72.0
 	switch vertAlign {
 	case 0:
 		text.Baseline = "hanging"
+		// Visio adds slight leading above the first line
+		textY -= fontSizeInches * 0.15
 	case 2:
 		text.Baseline = "alphabetic"
 	default:
@@ -573,7 +608,7 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 
 	// Calculate available width for text wrapping
 	availableWidth := (shapeW - leftMargin - rightMargin) * ((b.scaleX + b.scaleY) / 2)
-	charWidth := fontSizeSVG * 0.48 // approximate character width
+	charWidth := fontSizeSVG * 0.45 // approximate character width
 
 	// Wrap text to fit within shape width
 	lines := wrapTextLines(strings.TrimSpace(text.Content), availableWidth, charWidth)

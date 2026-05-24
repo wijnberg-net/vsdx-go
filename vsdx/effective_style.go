@@ -223,9 +223,15 @@ func (es *EffectiveStyle) resolveShadowProperties(s *Shape) {
 
 // resolveTextProperties resolves text-related properties.
 func (es *EffectiveStyle) resolveTextProperties(s *Shape) {
-	// Get text color using existing method
+	// Get text color - check Character section first, then QuickStyleFontMatrix, then QuickStyleFontColor
 	if color := s.TextColor(); color != "" {
 		es.TextColor = resolveColorStr(color)
+	} else if fontColor := s.resolveFontStyleColor(); fontColor != "" {
+		// Use QuickStyleFontMatrix to look up font color from theme fontStyles.
+		es.TextColor = fontColor
+	} else if qsColor := s.QuickStyleFontColor(); qsColor != "" {
+		// Fallback to direct QuickStyleFontColor resolution.
+		es.TextColor = qsColor
 	}
 
 	// Font size using existing method
@@ -443,16 +449,57 @@ func (s *Shape) resolveThemeColor(cellName string) string {
 
 		// Handle special value 100 which means "use variation-based index"
 		// Per MS-VSDX, QSLM=100 maps to the line style based on embellishment/variation.
-		// Common default is index 3 (which has lt1 with shade, giving gray stroke).
+		// Default to index 4 which points to LineStyles[3] (the neutral gray #C6C7C7).
 		if lineMatrixIdx == 100 {
 			// For non-connector shapes (QuickStyleType != 0), use the variation-based lineIdx.
-			// Default to index 3 which is typically the standard themed line style.
-			lineMatrixIdx = 3
+			// Index 4 (1-indexed) = LineStyles[3] which typically has the gray stroke color.
+			lineMatrixIdx = 4
 		}
 
-		if lineMatrixIdx >= 0 && lineMatrixIdx < len(theme.LineStyles) {
-			if color := theme.LineStyles[lineMatrixIdx].Color; color != "" {
-				return color
+		// QuickStyleLineMatrix is 1-indexed (value 1 = first style at index 0)
+		styleIdx := lineMatrixIdx - 1
+		if styleIdx >= 0 && styleIdx < len(theme.LineStyles) {
+			lineStyle := theme.LineStyles[styleIdx]
+			if lineStyle.Color != "" {
+				return lineStyle.Color
+			}
+			// Handle phClr (placeholder color) with tint/shade
+			// phClr uses fill color if shape has explicit FillForegnd, otherwise QuickStyleLineColor
+			if lineStyle.IsPhClr {
+				var baseColor string
+				// Only use fill if there's an explicit FillForegnd on the shape
+				if explicitFill := s.CellValueLocal("FillForegnd"); explicitFill != "" {
+					baseColor = resolveColor(explicitFill)
+				} else {
+					// Use QuickStyleLineColor for shapes without explicit fill
+					qslc := s.CellValue("QuickStyleLineColor")
+					if qslc != "" {
+						baseColor = s.resolveQuickStyleColor(int(toFloat(qslc)), "line")
+					} else {
+						// No QuickStyleLineColor set - use varColor1 (primary accent) or accent1
+						varIdx := int(toFloat(s.CellValue("QuickStyleVariation")))
+						if varIdx >= 0 && varIdx < len(theme.Variants) && len(theme.Variants[varIdx].VarColors) > 0 {
+							baseColor = theme.Variants[varIdx].VarColors[0] // varColor1
+						} else if len(theme.Variants) > 0 && len(theme.Variants[0].VarColors) > 0 {
+							baseColor = theme.Variants[0].VarColors[0]
+						} else {
+							baseColor = theme.Colors.Accent1
+						}
+					}
+				}
+				if baseColor != "" {
+					// For connectors (1D shapes), don't apply tint/shade - use color directly
+					if !s.IsConnector() {
+						// Apply tint first, then shade for non-connectors
+						if lineStyle.PhClrTint > 0 {
+							baseColor = applyTint(baseColor, lineStyle.PhClrTint)
+						}
+						if lineStyle.PhClrShade > 0 {
+							baseColor = applyShade(baseColor, lineStyle.PhClrShade)
+						}
+					}
+					return baseColor
+				}
 			}
 		}
 
@@ -600,43 +647,96 @@ func (s *Shape) IsConnector() bool {
 	return false
 }
 
+// resolveFontStyleColor resolves the font color from theme fontStyles using QuickStyleFontMatrix.
+// Per the theme structure, fontStyles are indexed by QuickStyleFontMatrix (1-indexed).
+// The fontProps elements contain schemeClr references (e.g., lt1=white, phClr=shape color).
+func (s *Shape) resolveFontStyleColor() string {
+	vis := s.Page.vis
+	if vis == nil {
+		return ""
+	}
+	theme := vis.Theme()
+	if theme == nil || len(theme.FontStyles) == 0 {
+		return ""
+	}
+
+	// Get QuickStyleFontMatrix from shape or inheritance chain.
+	fontMatrixIdx := -1
+
+	// Check own cell first.
+	if v := s.CellValue("QuickStyleFontMatrix"); v != "" {
+		fontMatrixIdx = int(toFloat(v))
+	}
+
+	// Check master shape.
+	if fontMatrixIdx < 0 {
+		if master := s.MasterShape(); master != nil {
+			if v := master.CellValue("QuickStyleFontMatrix"); v != "" {
+				fontMatrixIdx = int(toFloat(v))
+			}
+		}
+	}
+
+	// Check TextStyle reference for stylesheet.
+	if fontMatrixIdx < 0 && s.xml != nil && s.Page != nil && s.Page.vis != nil {
+		if textStyleID := s.xml.SelectAttrValue("TextStyle", ""); textStyleID != "" {
+			if ss := s.Page.vis.StyleSheetByID(textStyleID); ss != nil {
+				if v := ss.CellValueWithInheritance("QuickStyleFontMatrix"); v != "" {
+					fontMatrixIdx = int(toFloat(v))
+				}
+			}
+		}
+	}
+
+	if fontMatrixIdx <= 0 {
+		return ""
+	}
+
+	// fontStyles are 1-indexed, convert to 0-indexed.
+	idx := fontMatrixIdx - 1
+	if idx < 0 || idx >= len(theme.FontStyles) {
+		return ""
+	}
+
+	return theme.FontStyles[idx].Color
+}
+
 // computeArrowSetback calculates how much to shorten the path for an arrow marker.
-// This ensures arrows don't extend beyond the path endpoint.
+// The setback ensures the arrow body is visible and the tip reaches the shape edge.
+// With refX=0, the arrow tip extends forward by the marker width, so we shorten
+// the path by approximately the same amount.
 func computeArrowSetback(arrowType, arrowSize int, lineWeight float64) float64 {
 	if arrowType == 0 {
 		return 0
 	}
 
-	// Arrow size multipliers (MS-VSDX arrow size semantics)
-	// Index 0-6 correspond to specific size multipliers
-	sizeMultipliers := []float64{0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0}
-	sizeMult := 1.0
-	if arrowSize >= 0 && arrowSize < len(sizeMultipliers) {
-		sizeMult = sizeMultipliers[arrowSize]
+	// Size multipliers from MS-VSDX spec
+	sizeMultipliers := []float64{0.5, 0.7, 1.0, 1.3, 1.6, 2.0, 2.5}
+	sizeIdx := arrowSize
+	if sizeIdx < 0 || sizeIdx >= len(sizeMultipliers) {
+		sizeIdx = 2 // default medium
 	}
 
-	// Base setback depends on arrow type category
-	// Standard arrows (1-14): triangular, based on arrow length
-	// Circle arrows (15-22): diameter-based
-	// Other specialized arrows have their own metrics
-
-	var baseSetback float64
-	switch {
-	case arrowType >= 1 && arrowType <= 14:
-		// Triangular arrows: setback = arrow length
-		// Default arrow length is approximately 4x line weight
-		baseSetback = lineWeight * 4.0 * sizeMult
-	case arrowType >= 15 && arrowType <= 22:
-		// Circle/dot arrows: setback = radius
-		baseSetback = lineWeight * 2.0 * sizeMult
-	case arrowType >= 23 && arrowType <= 45:
-		// Specialized arrows: estimate
-		baseSetback = lineWeight * 3.0 * sizeMult
-	default:
-		baseSetback = lineWeight * 4.0 * sizeMult
+	// Length multiplier per arrow type (matching visioArrowTypes in svg.go)
+	// Type 13, 14 are longer arrows (1.5x), others are standard (1.0x)
+	lengthMult := 1.0
+	if arrowType == 13 || arrowType == 14 {
+		lengthMult = 1.5
 	}
 
-	return baseSetback
+	// Base visual arrow width (at 1pt stroke)
+	// Visio uses ~7 visual units as minimum, scales up with stroke weight
+	baseVisualWidth := 3.56 * sizeMultipliers[sizeIdx] * lengthMult
+	minVisualWidth := 7.0 * sizeMultipliers[sizeIdx] * lengthMult
+
+	// Calculate visual width: max(minimum, scaled by stroke weight)
+	visualWidth := baseVisualWidth * lineWeight
+	if visualWidth < minVisualWidth {
+		visualWidth = minVisualWidth
+	}
+
+	// Return setback in points (matches markerWidth * strokeWidth for SVG)
+	return visualWidth
 }
 
 // EffectiveLineColor returns the line color as CSS color.

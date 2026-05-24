@@ -86,26 +86,34 @@ func TestComputeEffectiveStyle_HasShadow(t *testing.T) {
 }
 
 func TestComputeArrowSetback(t *testing.T) {
+	// Setback uses minimum visual size to ensure arrows remain visible for thin strokes.
+	// Formula: max(baseVisualWidth * lineWeight, minVisualWidth)
+	// where baseVisualWidth = 3.56 * sizeMult * lengthMult
+	// and minVisualWidth = 7.0 * sizeMult * lengthMult
 	tests := []struct {
 		arrowType  int
 		arrowSize  int
 		lineWeight float64
-		wantMin    float64
-		wantMax    float64
+		want       float64
 	}{
-		{0, 2, 1.0, 0, 0},           // No arrow: zero setback
-		{1, 2, 1.0, 2.0, 8.0},       // Triangle arrow, medium size
-		{13, 2, 1.0, 2.0, 8.0},      // Standard arrow, medium size
-		{5, 2, 1.0, 1.0, 5.0},       // Circle arrow: smaller setback
-		{1, 0, 1.0, 1.0, 4.0},       // Small arrow
-		{1, 6, 1.0, 8.0, 20.0},      // Largest arrow
+		{0, 2, 1.0, 0},       // No arrow: zero setback
+		{1, 2, 1.0, 7.0},     // Type 1, size 2, 1pt: min(7.0) applies
+		{4, 2, 3.0, 10.68},   // Type 4, size 2, 3pt: 3.56 * 3 = 10.68 > min 7.0
+		{1, 0, 1.0, 3.5},     // Type 1, size 0, 1pt: min 7.0 * 0.5 = 3.5
+		{1, 6, 1.0, 17.5},    // Type 1, size 6, 1pt: min 7.0 * 2.5 = 17.5
+		{13, 2, 1.0, 10.5},   // Type 13, size 2, 1pt: min 7.0 * 1.5 = 10.5
+		{13, 2, 3.0, 16.02},  // Type 13, size 2, 3pt: 3.56 * 1.5 * 3 = 16.02
 	}
 
 	for _, tt := range tests {
 		got := computeArrowSetback(tt.arrowType, tt.arrowSize, tt.lineWeight)
-		if got < tt.wantMin || got > tt.wantMax {
-			t.Errorf("computeArrowSetback(%d, %d, %f) = %f; want between %f and %f",
-				tt.arrowType, tt.arrowSize, tt.lineWeight, got, tt.wantMin, tt.wantMax)
+		diff := got - tt.want
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 0.001 {
+			t.Errorf("computeArrowSetback(%d, %d, %f) = %f; want %f",
+				tt.arrowType, tt.arrowSize, tt.lineWeight, got, tt.want)
 		}
 	}
 }

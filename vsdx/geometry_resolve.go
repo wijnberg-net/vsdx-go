@@ -142,21 +142,23 @@ func (r *GeometryResolver) resolve() *ResolvedGeomResult {
 
 	// Apply arrow setbacks BEFORE finalizing path
 	// This is critical: setbacks must be applied in resolved coordinate space
+	// Include stroke width in marker ID to allow per-stroke-width marker sizing
+	swKey := fmt.Sprintf("%.0f", r.style.LineWeight*10) // e.g., "30" for 3pt, "10" for 1pt
 	if r.style.BeginArrow > 0 {
 		setback := r.computeArrowSetbackInSVGUnits(r.style.BeginArrowSetback)
 		if setback > 0 {
 			pathData = r.shortenPathStart(pathData, setback)
 		}
-		result.MarkerStart = fmt.Sprintf("url(#arrow_%d_%d_%s_start)",
-			r.style.BeginArrow, r.style.BeginArrowSize, strings.TrimPrefix(result.Stroke, "#"))
+		result.MarkerStart = fmt.Sprintf("url(#arrow_%d_%d_%s_%s_start)",
+			r.style.BeginArrow, r.style.BeginArrowSize, strings.TrimPrefix(result.Stroke, "#"), swKey)
 	}
 	if r.style.EndArrow > 0 {
 		setback := r.computeArrowSetbackInSVGUnits(r.style.EndArrowSetback)
 		if setback > 0 {
 			pathData = r.shortenPathEnd(pathData, setback)
 		}
-		result.MarkerEnd = fmt.Sprintf("url(#arrow_%d_%d_%s_end)",
-			r.style.EndArrow, r.style.EndArrowSize, strings.TrimPrefix(result.Stroke, "#"))
+		result.MarkerEnd = fmt.Sprintf("url(#arrow_%d_%d_%s_%s_end)",
+			r.style.EndArrow, r.style.EndArrowSize, strings.TrimPrefix(result.Stroke, "#"), swKey)
 	}
 
 	result.PathData = pathData
@@ -306,9 +308,9 @@ func (r *GeometryResolver) buildPathData() string {
 			eFormula := r.cellString(row, "E")
 			nurbsInfo := parseNURBSData(eFormula)
 
-			nurbsSVG := r.nurbsToSVG(prevX, prevY, svgX, svgY, sx+r.offsetX, sy+r.offsetY, nurbsInfo)
+			nurbsSVG, _, _, actualEndX, actualEndY := r.nurbsToSVGWithCP(prevX, prevY, svgX, svgY, sx+r.offsetX, sy+r.offsetY, nurbsInfo)
 			d.WriteString(nurbsSVG)
-			prevX, prevY = svgX, svgY
+			prevX, prevY = actualEndX, actualEndY
 
 		case "polylineto":
 			sx, sy := row.X(), row.Y()
@@ -363,6 +365,10 @@ func (r *GeometryResolver) buildPathData() string {
 		_ = startX
 		_ = startY
 	}
+
+	// Note: SVG markers with orient="auto" automatically calculate direction
+	// from the path tangent at the endpoint, so no direction stub is needed.
+	// The marker tip position is controlled by refX in the marker definition.
 
 	return d.String()
 }
@@ -493,8 +499,18 @@ func (r *GeometryResolver) ellipticalArcToSVG(startX, startY, cpX, cpY, endX, en
 // nurbsToSVG converts NURBS data to SVG bezier curves.
 // Uses B-spline evaluation and Bezier fitting for accurate curve representation.
 func (r *GeometryResolver) nurbsToSVG(prevX, prevY, svgX, svgY, endX, endY float64, nurbsInfo *nurbsData) string {
+	svg, _, _, _, _ := r.nurbsToSVGWithCP(prevX, prevY, svgX, svgY, endX, endY, nurbsInfo)
+	return svg
+}
+
+// nurbsToSVGWithCP converts NURBS data to SVG and returns the last control point and actual endpoint.
+// Returns: (svg, lastCPX, lastCPY, actualEndX, actualEndY)
+func (r *GeometryResolver) nurbsToSVGWithCP(prevX, prevY, svgX, svgY, endX, endY float64, nurbsInfo *nurbsData) (string, float64, float64, float64, float64) {
+	// Default control point is the previous point (for straight lines)
+	lastCPX, lastCPY := prevX, prevY
+	actualEndX, actualEndY := svgX, svgY
 	if nurbsInfo == nil || len(nurbsInfo.cps) == 0 {
-		return fmt.Sprintf("L%s %s", r.fmtNum(svgX), r.fmtNum(svgY))
+		return fmt.Sprintf("L%s %s", r.fmtNum(svgX), r.fmtNum(svgY)), lastCPX, lastCPY, actualEndX, actualEndY
 	}
 
 	// Convert control points to absolute local coordinates
@@ -515,47 +531,37 @@ func (r *GeometryResolver) nurbsToSVG(prevX, prevY, svgX, svgY, endX, endY float
 	var d strings.Builder
 
 	if len(nurbsInfo.cps) == 2 {
-		// Degree 3, 2 interior control points + start + end = 4 total control points
-		// Build the full B-spline control polygon and fit Bezier curve
-		startLocalX := prevX / r.scaleX
-		var startLocalY float64
-		if r.negativeH {
-			startLocalY = -prevY / r.scaleY
+		// For 2-CP NURBS with yType=1, Visio uses formula CPs directly as Bezier CPs:
+		// - Bezier CP1 = formula CP1 (first control point)
+		// - Bezier CP2 = formula CP2 (second control point)
+		// - Bezier End = (CP1.x, CP2.y) - X from CP1, Y from CP2
+
+		// Convert formula CPs to SVG coordinates
+		cp1SvgX, cp1SvgY := r.localToSVG(absPoints[0][0], absPoints[0][1])
+		cp2SvgX, cp2SvgY := r.localToSVG(absPoints[1][0], absPoints[1][1])
+
+		// Compute endpoint: X from CP1, Y from CP2
+		var actualEndSvgX, actualEndSvgY float64
+		if nurbsInfo.yType == 1 {
+			actualEndSvgX, _ = r.localToSVG(absPoints[0][0], 0) // Use CP1.x
+			_, actualEndSvgY = r.localToSVG(0, absPoints[1][1]) // Use CP2.y
 		} else {
-			startLocalY = r.parentH - prevY/r.scaleY
+			actualEndSvgX, actualEndSvgY = svgX, svgY
 		}
 
-		bsplineCtrl := [][2]float64{
-			{startLocalX, startLocalY},
-			{absPoints[0][0], absPoints[0][1]},
-			{absPoints[1][0], absPoints[1][1]},
-			{endX, endY},
-		}
-
-		// Use knotLast to properly convert B-spline to Bezier
-		bezierCtrl := r.fitBezierToBSpline(bsplineCtrl, nurbsInfo.knotLast)
-		if bezierCtrl != nil && len(bezierCtrl) == 4 {
-			cp1SvgX, cp1SvgY := r.localToSVG(bezierCtrl[1][0], bezierCtrl[1][1])
-			cp2SvgX, cp2SvgY := r.localToSVG(bezierCtrl[2][0], bezierCtrl[2][1])
-			d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
-				r.fmtNum(cp1SvgX), r.fmtNum(cp1SvgY),
-				r.fmtNum(cp2SvgX), r.fmtNum(cp2SvgY),
-				r.fmtNum(svgX), r.fmtNum(svgY)))
-		} else {
-			// Fallback to direct use of control points
-			cp1SvgX, cp1SvgY := r.localToSVG(absPoints[0][0], absPoints[0][1])
-			cp2SvgX, cp2SvgY := r.localToSVG(absPoints[1][0], absPoints[1][1])
-			d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
-				r.fmtNum(cp1SvgX), r.fmtNum(cp1SvgY),
-				r.fmtNum(cp2SvgX), r.fmtNum(cp2SvgY),
-				r.fmtNum(svgX), r.fmtNum(svgY)))
-		}
+		d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
+			r.fmtNum(cp1SvgX), r.fmtNum(cp1SvgY),
+			r.fmtNum(cp2SvgX), r.fmtNum(cp2SvgY),
+			r.fmtNum(actualEndSvgX), r.fmtNum(actualEndSvgY)))
+		lastCPX, lastCPY = cp2SvgX, cp2SvgY
+		actualEndX, actualEndY = actualEndSvgX, actualEndSvgY
 	} else if len(nurbsInfo.cps) == 1 {
 		// Degree 2, 1 control point → quadratic Bezier
 		cpSvgX, cpSvgY := r.localToSVG(absPoints[0][0], absPoints[0][1])
 		d.WriteString(fmt.Sprintf("Q%s %s %s %s",
 			r.fmtNum(cpSvgX), r.fmtNum(cpSvgY),
 			r.fmtNum(svgX), r.fmtNum(svgY)))
+		lastCPX, lastCPY = cpSvgX, cpSvgY
 	} else if len(nurbsInfo.cps) >= 3 {
 		// For 3+ interior control points, use B-spline to multi-Bezier conversion
 		// Build full control polygon: start + interior points + end
@@ -579,11 +585,13 @@ func (r *GeometryResolver) nurbsToSVG(prevX, prevY, svgX, svgY, endX, endY float
 		// Convert B-spline to multiple Bezier curves
 		beziers := r.bsplineToMultiBezier(ctrl, nurbsInfo.knotLast)
 		d.WriteString(beziers)
+		// Use last formula control point as last CP
+		lastCPX, lastCPY = r.localToSVG(absPoints[len(absPoints)-1][0], absPoints[len(absPoints)-1][1])
 	} else {
 		d.WriteString(fmt.Sprintf("L%s %s", r.fmtNum(svgX), r.fmtNum(svgY)))
 	}
 
-	return d.String()
+	return d.String(), lastCPX, lastCPY, actualEndX, actualEndY
 }
 
 func (r *GeometryResolver) detectLShape(absPoints [][2]float64) bool {
@@ -1009,6 +1017,51 @@ func (r *GeometryResolver) shortenPathStart(pathData string, shortenBy float64) 
 				return fmt.Sprintf("M%s %s%s", r.fmtNum(newStartX), r.fmtNum(newStartY), rest)
 			}
 		}
+	} else if nextCmd == 'C' {
+		// CurveTo - shorten by moving start point along tangent
+		cmdCoords := strings.Fields(rest[1:cmdEnd])
+		if len(cmdCoords) >= 6 {
+			cp1X, _ := parseFloat(cmdCoords[0])
+			cp1Y, _ := parseFloat(cmdCoords[1])
+			cp2X, _ := parseFloat(cmdCoords[2])
+			cp2Y, _ := parseFloat(cmdCoords[3])
+			endX, _ := parseFloat(cmdCoords[4])
+			endY, _ := parseFloat(cmdCoords[5])
+
+			// Tangent at start is (cp1 - start)
+			dx := cp1X - startX
+			dy := cp1Y - startY
+			segmentLen := math.Sqrt(dx*dx + dy*dy)
+
+			effectiveShorten := shortenBy
+			if segmentLen > 0.01 && segmentLen < shortenBy {
+				effectiveShorten = segmentLen * 0.9
+			}
+
+			if segmentLen > 0.01 {
+				// Normalize direction
+				dx = dx / segmentLen
+				dy = dy / segmentLen
+
+				// Move start forward along tangent
+				newStartX := startX + dx*effectiveShorten
+				newStartY := startY + dy*effectiveShorten
+
+				// Move cp1 proportionally to maintain curve shape
+				cp1Ratio := effectiveShorten / segmentLen
+				if cp1Ratio > 0.5 {
+					cp1Ratio = 0.5
+				}
+				newCp1X := cp1X + dx*effectiveShorten*cp1Ratio
+				newCp1Y := cp1Y + dy*effectiveShorten*cp1Ratio
+
+				newCurve := fmt.Sprintf("C%s %s %s %s %s %s",
+					r.fmtNum(newCp1X), r.fmtNum(newCp1Y),
+					r.fmtNum(cp2X), r.fmtNum(cp2Y),
+					r.fmtNum(endX), r.fmtNum(endY))
+				return fmt.Sprintf("M%s %s%s%s", r.fmtNum(newStartX), r.fmtNum(newStartY), newCurve, rest[cmdEnd:])
+			}
+		}
 	}
 
 	return pathData
@@ -1071,20 +1124,39 @@ func (r *GeometryResolver) shortenPathEnd(pathData string, shortenBy float64) st
 		endX, _ := parseFloat(parts[len(parts)-2])
 		endY, _ := parseFloat(parts[len(parts)-1])
 
-		// Follow Visio's approach: shorten curve slightly and add line segment
-		// This preserves the curve shape better than modifying control points
+		// Compute tangent direction at curve endpoint
+		// For cubic Bezier: tangent at t=1 is (end - cp2)
 		dx := endX - cp2X
 		dy := endY - cp2Y
-		length := math.Sqrt(dx*dx + dy*dy)
-		if length > shortenBy {
-			ratio := shortenBy / length
-			newEndX := endX - dx*ratio
-			newEndY := endY - dy*ratio
+		segmentLen := math.Sqrt(dx*dx + dy*dy)
 
-			// Keep original control points, just shorten to new endpoint
+		// Only shorten if the segment is long enough
+		// If segment is shorter than setback, limit to segment length to avoid overshooting
+		effectiveShorten := shortenBy
+		if segmentLen > 0.01 && segmentLen < shortenBy {
+			effectiveShorten = segmentLen * 0.9 // Leave a small portion
+		}
+
+		if segmentLen > 0.01 {
+			// Normalize direction
+			dx = dx / segmentLen
+			dy = dy / segmentLen
+
+			// Compute new endpoint moved back by effectiveShorten
+			newEndX := endX - dx*effectiveShorten
+			newEndY := endY - dy*effectiveShorten
+
+			// Move cp2 proportionally to maintain curve shape
+			cp2Ratio := effectiveShorten / segmentLen
+			if cp2Ratio > 0.5 {
+				cp2Ratio = 0.5
+			}
+			newCp2X := cp2X - dx*effectiveShorten*cp2Ratio
+			newCp2Y := cp2Y - dy*effectiveShorten*cp2Ratio
+
 			newArgs := fmt.Sprintf("%s %s %s %s %s %s",
 				r.fmtNum(cp1X), r.fmtNum(cp1Y),
-				r.fmtNum(cp2X), r.fmtNum(cp2Y),
+				r.fmtNum(newCp2X), r.fmtNum(newCp2Y),
 				r.fmtNum(newEndX), r.fmtNum(newEndY))
 			return prefix + "C" + newArgs
 		}

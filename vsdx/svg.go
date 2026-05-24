@@ -46,32 +46,35 @@ type SVGResult struct {
 
 // ArrowDef defines an SVG marker for Visio arrow types.
 type ArrowDef struct {
-	Path   string  // SVG path data
-	Width  float64 // marker width relative to line weight
-	Height float64 // marker height relative to line weight
-	RefX   float64 // attachment point X
-	RefY   float64 // attachment point Y
-	Filled bool    // whether the arrow is filled
+	Path      string  // SVG path data
+	Width     float64 // marker width relative to line weight
+	Height    float64 // marker height relative to line weight
+	RefX      float64 // attachment point X
+	RefY      float64 // attachment point Y
+	Filled    bool    // whether the arrow is filled
+	LengthMult float64 // length multiplier (1.0 = standard, 1.5 = longer arrow like type 13)
 }
 
 // visioArrowTypes maps Visio arrow type indices to SVG path definitions.
-// RefX=10 places arrow tip at line end (arrow points right, tip at x=10).
+// RefX=0 places arrow back at line end, so tip extends forward by marker width.
+// Path is shortened by setback to compensate, placing tip at original endpoint.
+// LengthMult adjusts arrow length relative to standard (type 4 = 1.0, type 13 = 1.5).
 var visioArrowTypes = map[int]ArrowDef{
 	0:  {}, // None
-	1:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Triangle (filled)
-	2:  {Path: "M0 0 L10 5 L0 10 L2 5 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},  // Stealth
-	3:  {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false},        // Triangle (open)
-	4:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},  // Line arrow (filled triangle in Visio export)
-	5:  {Path: "M10 5 L2 0 L3.4 5 L2 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true}, // Stealth with concave back
-	6:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},  // Diamond (filled)
-	7:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false}, // Diamond (open)
-	8:  {Path: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false},  // Oval (open)
-	9:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Double triangle
-	10: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Triangle 45°
-	13: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Standard arrow
-	14: {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false},        // Open arrow
-	22: {Path: "M0 5 L5 0 L10 5 M0 5 L5 10 L10 5", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: false}, // Fletching
-	45: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 4, RefY: 5, Filled: true},       // Filled arrow (fallback)
+	1:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},       // Triangle (filled)
+	2:  {Path: "M0 0 L10 5 L0 10 L2 5 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},  // Stealth
+	3:  {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false, LengthMult: 1.0},        // Triangle (open)
+	4:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},  // Line arrow (short triangle)
+	5:  {Path: "M10 5 L2 0 L3.4 5 L2 10 z", Width: 10, Height: 10, RefX: 2, RefY: 5, Filled: true, LengthMult: 1.0}, // Stealth with concave back
+	6:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},  // Diamond (filled)
+	7:  {Path: "M0 5 L5 0 L10 5 L5 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false, LengthMult: 1.0}, // Diamond (open)
+	8:  {Path: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false, LengthMult: 1.0},  // Oval (open)
+	9:  {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},       // Double triangle
+	10: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},       // Triangle 45°
+	13: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.5},       // Standard arrow (longer)
+	14: {Path: "M0 0 L10 5 L0 10", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false, LengthMult: 1.5},        // Open arrow (longer)
+	22: {Path: "M0 5 L5 0 L10 5 M0 5 L5 10 L10 5", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: false, LengthMult: 1.0}, // Fletching
+	45: {Path: "M0 0 L10 5 L0 10 z", Width: 10, Height: 10, RefX: 0, RefY: 5, Filled: true, LengthMult: 1.0},       // Filled arrow (fallback)
 }
 
 // arrowSizeMultipliers maps Visio arrow size indices (0-6) to scale multipliers.
@@ -333,10 +336,16 @@ func generateMarkerSVG(m markerRef, precision int) string {
 		sizeMult = arrowSizeMultipliers[m.size]
 	}
 
+	// Apply arrow length multiplier (e.g., type 13 is 1.5x longer than type 4)
+	lengthMult := def.LengthMult
+	if lengthMult == 0 {
+		lengthMult = 1.0
+	}
+
 	// Scale marker size relative to line width.
 	// markerWidth/Height are in stroke-width units (markerUnits="strokeWidth").
 	scaleFactor := sizeMult * 0.36
-	w := def.Width * scaleFactor
+	w := def.Width * scaleFactor * lengthMult
 	h := def.Height * scaleFactor
 
 	// refX=0 for all arrows - arrow back at attachment, tip extends forward
