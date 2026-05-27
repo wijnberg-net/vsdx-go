@@ -30,21 +30,22 @@ type GeometryResolver struct {
 
 // ResolvedGeomResult contains the resolved geometry ready for SVG emission.
 type ResolvedGeomResult struct {
-	PathData     string  // SVG path data (d attribute)
-	Fill         string  // fill color
-	Stroke       string  // stroke color
-	StrokeWidth  float64 // stroke width in SVG units
-	FillOpacity  float64 // 0-1
-	DashArray    string  // stroke-dasharray
-	LineCap      string  // stroke-linecap
-	VectorEffect string  // vector-effect attribute
-	MarkerStart  string  // marker-start URL
-	MarkerEnd    string  // marker-end URL
-	FilterID     string  // filter URL for shadows
-	GradientID   string  // gradient URL for fills
-	NoFill       bool    // geometry-level NoFill
-	NoLine       bool    // geometry-level NoLine
-	NoShow       bool    // geometry-level NoShow
+	PathData      string  // SVG path data (d attribute)
+	Fill          string  // fill color
+	Stroke        string  // stroke color
+	StrokeWidth   float64 // stroke width in SVG units
+	FillOpacity   float64 // 0-1
+	DashArray     string  // stroke-dasharray
+	LineCap       string  // stroke-linecap
+	VectorEffect  string  // vector-effect attribute
+	MarkerStart   string  // marker-start URL
+	MarkerEnd     string  // marker-end URL
+	FilterID      string  // filter URL for shadows
+	GradientID    string  // gradient URL for fills
+	FillPatternID string  // fill pattern URL for hatching (patterns 2-24)
+	NoFill        bool    // geometry-level NoFill
+	NoLine        bool    // geometry-level NoLine
+	NoShow        bool    // geometry-level NoShow
 }
 
 // ResolveGeometry resolves a geometry section into SVG-ready path data.
@@ -120,6 +121,14 @@ func (r *GeometryResolver) resolve() *ResolvedGeomResult {
 	if result.NoFill {
 		result.Fill = "none"
 	}
+
+	// Create fill pattern for hatching patterns (2-24)
+	if r.style.FillPattern >= 2 && r.style.FillPattern <= 24 && !result.NoFill {
+		patDef := createFillPatternDef(r.style.FillPattern, r.style.FillForegnd, r.style.FillBkgnd)
+		if patDef != nil {
+			result.FillPatternID = patDef.ID
+		}
+	}
 	if result.NoLine {
 		result.Stroke = "none"
 	}
@@ -129,10 +138,12 @@ func (r *GeometryResolver) resolve() *ResolvedGeomResult {
 		result.DashArray = linePatternToSVG(r.style.LinePattern, result.StrokeWidth)
 	}
 
-	// Vector effect for non-scaling stroke
-	if result.Stroke != "none" {
-		result.VectorEffect = "non-scaling-stroke"
-	}
+	// Note: we intentionally do NOT set vector-effect="non-scaling-stroke".
+	// Our render tree only applies translation transforms (no scaling), so
+	// strokes already render at their declared width in user-space units -
+	// matching Visio's output. Forcing non-scaling-stroke makes rsvg-convert
+	// (and Chrome) treat stroke-width as device pixels, producing strokes
+	// roughly 30% thinner than Visio's at the same viewBox scale.
 
 	// Build path data
 	pathData := r.buildPathData()
@@ -307,6 +318,12 @@ func (r *GeometryResolver) buildPathData() string {
 			svgX, svgY := r.localToSVG(sx+r.offsetX, sy+r.offsetY)
 			eFormula := r.cellString(row, "E")
 			nurbsInfo := parseNURBSData(eFormula)
+			// Cell A = knot value of the LAST control point (the END's knot).
+			// This is the actual interior-knot position for Boehm B-spline →
+			// Bezier conversion (NOT a uniformly-spaced midpoint).
+			if nurbsInfo != nil {
+				nurbsInfo.lastCPKnot = r.cellFloat(row, "A")
+			}
 
 			nurbsSVG, _, _, actualEndX, actualEndY := r.nurbsToSVGWithCP(prevX, prevY, svgX, svgY, sx+r.offsetX, sy+r.offsetY, nurbsInfo)
 			d.WriteString(nurbsSVG)
@@ -531,28 +548,39 @@ func (r *GeometryResolver) nurbsToSVGWithCP(prevX, prevY, svgX, svgY, endX, endY
 	var d strings.Builder
 
 	if len(nurbsInfo.cps) == 2 {
-		// For 2-CP NURBS with yType=1, Visio uses formula CPs directly as Bezier CPs:
-		// - Bezier CP1 = formula CP1 (first control point)
-		// - Bezier CP2 = formula CP2 (second control point)
-		// - Bezier End = (CP1.x, CP2.y) - X from CP1, Y from CP2
+		// Two-control-point NURBS: map directly to a cubic Bezier.
+		// - Bezier CP1 = formula CP1
+		// - Bezier CP2 = formula CP2
+		// - Bezier endpoint = the NURBSTo row's (X, Y), which is the curve's
+		//   true logical end (used by Visio for connector endpoints, arrow
+		//   placement, etc.). Earlier code rebuilt the endpoint from
+		//   (CP1.x, CP2.y) when yType=1, but that synthetic endpoint sits
+		//   ~10 path-units before the row's X/Y for typical right-leading
+		//   connectors, leaving the marker tip floating short of the target
+		//   shape after the arrow setback is applied.
 
 		// Convert formula CPs to SVG coordinates
 		cp1SvgX, cp1SvgY := r.localToSVG(absPoints[0][0], absPoints[0][1])
 		cp2SvgX, cp2SvgY := r.localToSVG(absPoints[1][0], absPoints[1][1])
 
-		// Compute endpoint: X from CP1, Y from CP2
-		var actualEndSvgX, actualEndSvgY float64
-		if nurbsInfo.yType == 1 {
-			actualEndSvgX, _ = r.localToSVG(absPoints[0][0], 0) // Use CP1.x
-			_, actualEndSvgY = r.localToSVG(0, absPoints[1][1]) // Use CP2.y
-		} else {
-			actualEndSvgX, actualEndSvgY = svgX, svgY
-		}
+		actualEndSvgX, actualEndSvgY := svgX, svgY
 
-		d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
-			r.fmtNum(cp1SvgX), r.fmtNum(cp1SvgY),
-			r.fmtNum(cp2SvgX), r.fmtNum(cp2SvgY),
-			r.fmtNum(actualEndSvgX), r.fmtNum(actualEndSvgY)))
+		// Guard against a degenerate Bezier where the trailing control point
+		// coincides with the endpoint. SVG's orient="auto" then has no
+		// defined tangent and rsvg-convert/Chrome fall back to the marker's
+		// default (right-pointing) orientation - the rotated-arrow symptom
+		// seen on straight vertical connectors. Emitting a line preserves
+		// the visual geometry while giving markers a well-defined direction.
+		const degenerateEps = 1e-3
+		if math.Abs(cp2SvgX-actualEndSvgX) < degenerateEps && math.Abs(cp2SvgY-actualEndSvgY) < degenerateEps {
+			d.WriteString(fmt.Sprintf("L%s %s",
+				r.fmtNum(actualEndSvgX), r.fmtNum(actualEndSvgY)))
+		} else {
+			d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
+				r.fmtNum(cp1SvgX), r.fmtNum(cp1SvgY),
+				r.fmtNum(cp2SvgX), r.fmtNum(cp2SvgY),
+				r.fmtNum(actualEndSvgX), r.fmtNum(actualEndSvgY)))
+		}
 		lastCPX, lastCPY = cp2SvgX, cp2SvgY
 		actualEndX, actualEndY = actualEndSvgX, actualEndSvgY
 	} else if len(nurbsInfo.cps) == 1 {
@@ -563,30 +591,141 @@ func (r *GeometryResolver) nurbsToSVGWithCP(prevX, prevY, svgX, svgY, endX, endY
 			r.fmtNum(svgX), r.fmtNum(svgY)))
 		lastCPX, lastCPY = cpSvgX, cpSvgY
 	} else if len(nurbsInfo.cps) >= 3 {
-		// For 3+ interior control points, use B-spline to multi-Bezier conversion
-		// Build full control polygon: start + interior points + end
-		startLocalX := prevX / r.scaleX
-		var startLocalY float64
-		if r.negativeH {
-			startLocalY = -prevY / r.scaleY
+		// Visio's 3-CP NURBS connectors all have interior knots = 0 in their
+		// formula data. Mathematically this stacks the start-clamp knot
+		// multiplicity, degenerating the curve so that Visio's intended
+		// shape depends on whether the interior control points stay near
+		// the start-end straight line (gentle arc) or fly off well past it
+		// (a wavy / S-shaped connector).
+		//
+		// Our uniform-knot LSQ-fit produces a symmetric two-segment Bezier
+		// that loops the first segment back through CP1 - acceptable for
+		// the wavy case (where the wave is intended) but visibly wrong for
+		// the gentle-arc case (where it manifests as an S-curve dip near
+		// the start). Distinguish the two cases by looking at whether the
+		// interior CP X values stay within the start-end bounding box; if
+		// they do, collapse to a single cubic Bezier using the outermost
+		// interior CPs as control points.
+		// The gentle-arc single-Bezier collapse only applies when the
+		// formula's interior control points have a NON-MONOTONIC X
+		// sequence (i.e. X goes back-and-forth). That's the geometric
+		// signature of the "loop-back" CP polygon that makes our
+		// uniform-knot LSQ multi-Bezier fit emit a visible S-curve at
+		// the start (concrete example: shape 30 Provisioning ↔ Registry,
+		// CPs X = 0.121, 0.066, 0.516 - dip at CP2).
+		//
+		// When the CP X values are monotonic AND inside the start-end
+		// X bounding box, the LSQ multi-Bezier fit produces a curve
+		// shape that matches Visio's golden output very closely
+		// (concrete example: shape 24 Event Processing → Warm Storage,
+		// CPs X = 0.25, 1, 1 - monotonic, L-shape rendering correct).
+		gentleArc := false
+		if len(nurbsInfo.cps) >= 2 {
+			startLocalX := prevX / r.scaleX
+			minX, maxX := startLocalX, endX
+			if minX > maxX {
+				minX, maxX = maxX, minX
+			}
+			span := maxX - minX
+			tol := span * 0.10
+
+			// Check that all CPs are inside the bounding box.
+			inBounds := true
+			for _, p := range absPoints {
+				if p[0] < minX-tol || p[0] > maxX+tol {
+					inBounds = false
+					break
+				}
+			}
+
+			// Check monotonic X progression in the CP polygon
+			// (start → CP[0] → CP[1] → ... → end).
+			monotonic := true
+			prev := startLocalX
+			ascending := endX >= startLocalX
+			for _, p := range absPoints {
+				if ascending && p[0]+tol < prev {
+					monotonic = false
+					break
+				}
+				if !ascending && p[0]-tol > prev {
+					monotonic = false
+					break
+				}
+				prev = p[0]
+			}
+
+			// Single-Bezier collapse only for in-bounds AND non-monotonic.
+			gentleArc = inBounds && !monotonic
+		}
+
+		if gentleArc {
+			// Match Visio's curve tangent at start/end empirically.
+			//
+			// For Visio's degenerate-knot NURBS (interior knots all = 0),
+			// the rendered start tangent direction lands close to the
+			// direction from the MoveTo point to the AVERAGE of the first
+			// two interior control points - NOT either CP individually.
+			// (Concrete example: shape 30 in logical-architecture has
+			//  Visio tangent angle -38.2° at start, where -38.8° comes
+			//  from avg(CP[0],CP[1]), -66° from CP[0] alone, 0° from CP[1]
+			//  alone.) The end tangent direction matches the formula's
+			//  last interior CP, so we use that directly.
+			//
+			// Result: Bezier cp1 = average of the first two interior CPs,
+			// Bezier cp2 = the last interior CP. This gives both tangents
+			// near Visio's rendered direction without needing a proper
+			// NURBS-knot-aware curve evaluator.
+			n := len(absPoints)
+			var cp1X, cp1Y float64
+			if n >= 2 {
+				cp1X = (absPoints[0][0] + absPoints[1][0]) / 2
+				cp1Y = (absPoints[0][1] + absPoints[1][1]) / 2
+			} else {
+				cp1X = absPoints[0][0]
+				cp1Y = absPoints[0][1]
+			}
+			cpFirstSvgX, cpFirstSvgY := r.localToSVG(cp1X, cp1Y)
+			cpLastSvgX, cpLastSvgY := r.localToSVG(absPoints[n-1][0], absPoints[n-1][1])
+			d.WriteString(fmt.Sprintf("C%s %s %s %s %s %s",
+				r.fmtNum(cpFirstSvgX), r.fmtNum(cpFirstSvgY),
+				r.fmtNum(cpLastSvgX), r.fmtNum(cpLastSvgY),
+				r.fmtNum(svgX), r.fmtNum(svgY)))
+			lastCPX, lastCPY = cpLastSvgX, cpLastSvgY
 		} else {
-			startLocalY = r.parentH - prevY/r.scaleY
-		}
+			// Build control polygon with all points
+			startLocalX := prevX / r.scaleX
+			var startLocalY float64
+			if r.negativeH {
+				startLocalY = -prevY / r.scaleY
+			} else {
+				startLocalY = r.parentH - prevY/r.scaleY
+			}
 
-		// Build control polygon with all points
-		n := len(nurbsInfo.cps) + 2 // start + interior + end
-		ctrl := make([][2]float64, n)
-		ctrl[0] = [2]float64{startLocalX, startLocalY}
-		for i, pt := range absPoints {
-			ctrl[i+1] = [2]float64{pt[0], pt[1]}
-		}
-		ctrl[n-1] = [2]float64{endX, endY}
+			n := len(nurbsInfo.cps) + 2 // start + interior + end
+			ctrl := make([][2]float64, n)
+			ctrl[0] = [2]float64{startLocalX, startLocalY}
+			for i, pt := range absPoints {
+				ctrl[i+1] = [2]float64{pt[0], pt[1]}
+			}
+			ctrl[n-1] = [2]float64{endX, endY}
 
-		// Convert B-spline to multiple Bezier curves
-		beziers := r.bsplineToMultiBezier(ctrl, nurbsInfo.knotLast)
-		d.WriteString(beziers)
-		// Use last formula control point as last CP
-		lastCPX, lastCPY = r.localToSVG(absPoints[len(absPoints)-1][0], absPoints[len(absPoints)-1][1])
+			// For the common 5-CP cubic case with one interior knot, do the
+			// exact Boehm B-spline → Bezier conversion using r = A/knotLast
+			// (where A is the last control point's knot value from cell A).
+			// This reproduces Visio's exact rendered curve, not just an LSQ
+			// approximation - giving pixel-perfect connector curves for the
+			// monotonic-X 3-CP NURBS connectors (shape 24, 25, 27, ...).
+			if n == 5 && nurbsInfo.knotLast > 0 && nurbsInfo.lastCPKnot > 0 && nurbsInfo.lastCPKnot < nurbsInfo.knotLast {
+				ratio := nurbsInfo.lastCPKnot / nurbsInfo.knotLast
+				beziers := r.boehmCubicBspline5(ctrl, ratio)
+				d.WriteString(beziers)
+			} else {
+				beziers := r.bsplineToMultiBezier(ctrl, nurbsInfo.knotLast)
+				d.WriteString(beziers)
+			}
+			lastCPX, lastCPY = r.localToSVG(absPoints[len(absPoints)-1][0], absPoints[len(absPoints)-1][1])
+		}
 	} else {
 		d.WriteString(fmt.Sprintf("L%s %s", r.fmtNum(svgX), r.fmtNum(svgY)))
 	}
@@ -1033,31 +1172,34 @@ func (r *GeometryResolver) shortenPathStart(pathData string, shortenBy float64) 
 			dy := cp1Y - startY
 			segmentLen := math.Sqrt(dx*dx + dy*dy)
 
-			effectiveShorten := shortenBy
-			if segmentLen > 0.01 && segmentLen < shortenBy {
-				effectiveShorten = segmentLen * 0.9
-			}
-
 			if segmentLen > 0.01 {
-				// Normalize direction
-				dx = dx / segmentLen
-				dy = dy / segmentLen
-
-				// Move start forward along tangent
-				newStartX := startX + dx*effectiveShorten
-				newStartY := startY + dy*effectiveShorten
-
-				// Move cp1 proportionally to maintain curve shape
-				cp1Ratio := effectiveShorten / segmentLen
-				if cp1Ratio > 0.5 {
-					cp1Ratio = 0.5
+				// When the requested setback exceeds the start-to-cp1
+				// chord, the previous implementation clamped to 90% of
+				// segmentLen which left the marker tip stranded inside
+				// the source shape (because the line was not actually
+				// shortened far enough). Properly handle this by
+				// subdividing the Bezier with de Casteljau at the
+				// parameter t whose chord distance from start equals
+				// shortenBy - this yields a correctly-shortened curve
+				// whose new start sits the full setback distance from
+				// the original start along the curve.
+				newStartX, newStartY, newCp1X, newCp1Y, newCp2X, newCp2Y, ok :=
+					subdivideCubicByChord(startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY, shortenBy)
+				if !ok {
+					// Fallback: linear move along start tangent.
+					dx /= segmentLen
+					dy /= segmentLen
+					newStartX = startX + dx*shortenBy
+					newStartY = startY + dy*shortenBy
+					newCp1X = cp1X
+					newCp1Y = cp1Y
+					newCp2X = cp2X
+					newCp2Y = cp2Y
 				}
-				newCp1X := cp1X + dx*effectiveShorten*cp1Ratio
-				newCp1Y := cp1Y + dy*effectiveShorten*cp1Ratio
 
 				newCurve := fmt.Sprintf("C%s %s %s %s %s %s",
 					r.fmtNum(newCp1X), r.fmtNum(newCp1Y),
-					r.fmtNum(cp2X), r.fmtNum(cp2Y),
+					r.fmtNum(newCp2X), r.fmtNum(newCp2Y),
 					r.fmtNum(endX), r.fmtNum(endY))
 				return fmt.Sprintf("M%s %s%s%s", r.fmtNum(newStartX), r.fmtNum(newStartY), newCurve, rest[cmdEnd:])
 			}
@@ -1065,6 +1207,186 @@ func (r *GeometryResolver) shortenPathStart(pathData string, shortenBy float64) 
 	}
 
 	return pathData
+}
+
+// boehmCubicBspline5 converts a clamped cubic B-spline with exactly 5 control
+// points and one interior knot at parameter t_m = ratio * knotLast into two
+// connected cubic Bezier segments using Boehm's knot insertion algorithm.
+//
+// The knot vector is [0,0,0,0, t_m, T,T,T,T] with T = knotLast and t_m at
+// position ratio (where Visio sets t_m = cell A's knot value, NOT a uniform
+// midpoint).
+//
+// For r = t_m/T = ratio:
+//
+//	Q2 = (1-r)*P1 + r*P2
+//	Q3 = (1-r)*P2 + r*P3
+//	R3 = (1-r)*Q2 + r*Q3      (= curve value at t = t_m)
+//
+// First Bezier:  P0, P1, Q2, R3
+// Second Bezier: R3, Q3, P3, P4
+//
+// This is the exact decomposition Visio uses, so the rendered curve matches
+// pixel-for-pixel rather than the approximate LSQ-fit from sample points.
+func (r *GeometryResolver) boehmCubicBspline5(ctrl [][2]float64, ratio float64) string {
+	if len(ctrl) != 5 {
+		return ""
+	}
+	// Clamp ratio to (0, 1) to avoid degenerate output.
+	if ratio <= 1e-6 {
+		ratio = 1e-6
+	}
+	if ratio >= 1.0-1e-6 {
+		ratio = 1.0 - 1e-6
+	}
+	// ctrl[0] is the path start; it's already at the path cursor via the
+	// preceding command. The two emitted Beziers consume control points 1..4
+	// plus the derived split point.
+	_ = ctrl[0]
+	p1, p2, p3, p4 := ctrl[1], ctrl[2], ctrl[3], ctrl[4]
+	one := 1.0 - ratio
+	q2 := [2]float64{one*p1[0] + ratio*p2[0], one*p1[1] + ratio*p2[1]}
+	q3 := [2]float64{one*p2[0] + ratio*p3[0], one*p2[1] + ratio*p3[1]}
+	r3 := [2]float64{one*q2[0] + ratio*q3[0], one*q2[1] + ratio*q3[1]}
+
+	// First Bezier: p0, p1, q2, r3
+	c1x0, c1y0 := r.localToSVG(p1[0], p1[1])
+	c1x1, c1y1 := r.localToSVG(q2[0], q2[1])
+	endX1, endY1 := r.localToSVG(r3[0], r3[1])
+
+	// Second Bezier: r3 → q3 → p3 → p4
+	c2x0, c2y0 := r.localToSVG(q3[0], q3[1])
+	c2x1, c2y1 := r.localToSVG(p3[0], p3[1])
+	endX2, endY2 := r.localToSVG(p4[0], p4[1])
+
+	return fmt.Sprintf("C%s %s %s %s %s %sC%s %s %s %s %s %s",
+		r.fmtNum(c1x0), r.fmtNum(c1y0),
+		r.fmtNum(c1x1), r.fmtNum(c1y1),
+		r.fmtNum(endX1), r.fmtNum(endY1),
+		r.fmtNum(c2x0), r.fmtNum(c2y0),
+		r.fmtNum(c2x1), r.fmtNum(c2y1),
+		r.fmtNum(endX2), r.fmtNum(endY2))
+}
+
+// subdivideCubicByChordFromEnd splits a cubic Bezier at the parameter t whose
+// chord distance from the END point equals targetDist, returning the control
+// points of the FIRST sub-curve (from 0 to t) - i.e. the curve with its end
+// shortened by setback. Same role as subdivideCubicByChord, just operating
+// from the t=1 side instead of t=0.
+func subdivideCubicByChordFromEnd(x0, y0, x1, y1, x2, y2, x3, y3, targetDist float64) (
+	sx, sy, c1x, c1y, c2x, c2y, ex, ey float64, ok bool) {
+	if targetDist <= 0 {
+		return x0, y0, x1, y1, x2, y2, x3, y3, false
+	}
+	bez := func(t float64) (float64, float64) {
+		u := 1 - t
+		uu := u * u
+		uuu := uu * u
+		tt := t * t
+		ttt := tt * t
+		bx := uuu*x0 + 3*uu*t*x1 + 3*u*tt*x2 + ttt*x3
+		by := uuu*y0 + 3*uu*t*y1 + 3*u*tt*y2 + ttt*y3
+		return bx, by
+	}
+	distFromEnd := func(t float64) float64 {
+		bx, by := bez(t)
+		dx := bx - x3
+		dy := by - y3
+		return math.Sqrt(dx*dx + dy*dy)
+	}
+
+	// Check that the target is reachable.
+	if distFromEnd(0) < targetDist {
+		return x0, y0, x1, y1, x2, y2, x3, y3, false
+	}
+
+	// distFromEnd is monotonically increasing as t decreases from 1.
+	lo, hi := 0.0, 1.0
+	for i := 0; i < 40; i++ {
+		mid := (lo + hi) / 2
+		if distFromEnd(mid) > targetDist {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	t := (lo + hi) / 2
+
+	// De Casteljau split at t. Keep FIRST sub-curve (from t=0 to t).
+	lerp := func(a, b, k float64) float64 { return a + (b-a)*k }
+	p01x, p01y := lerp(x0, x1, t), lerp(y0, y1, t)
+	p12x, p12y := lerp(x1, x2, t), lerp(y1, y2, t)
+	p23x, p23y := lerp(x2, x3, t), lerp(y2, y3, t)
+	p012x, p012y := lerp(p01x, p12x, t), lerp(p01y, p12y, t)
+	p123x, p123y := lerp(p12x, p23x, t), lerp(p12y, p23y, t)
+	p0123x, p0123y := lerp(p012x, p123x, t), lerp(p012y, p123y, t)
+
+	// First sub-curve: P0, p01, p012, p0123
+	return x0, y0, p01x, p01y, p012x, p012y, p0123x, p0123y, true
+}
+
+// subdivideCubicByChord splits a cubic Bezier at the parameter t whose chord
+// distance from the start point equals targetDist, and returns the control
+// points of the SECOND sub-curve (from t to 1). This is the correct way to
+// shorten the start of a cubic Bezier by a given setback distance: the new
+// start lies the full setback along the curve and the new control points
+// preserve the original curve shape past that point.
+//
+// Returns ok=false when the curve cannot be shortened (e.g. the entire chord
+// length is below targetDist), letting the caller fall back to a simpler
+// tangent-based shift.
+func subdivideCubicByChord(x0, y0, x1, y1, x2, y2, x3, y3, targetDist float64) (sx, sy, c1x, c1y, c2x, c2y float64, ok bool) {
+	if targetDist <= 0 {
+		return x0, y0, x1, y1, x2, y2, false
+	}
+	// Walk t from 0 to 1 with binary search until |B(t) - B(0)| == targetDist.
+	// The chord from B(0) is monotonically (mostly) increasing in t for the
+	// non-degenerate curves we deal with here.
+	bez := func(t float64) (float64, float64) {
+		u := 1 - t
+		uu := u * u
+		uuu := uu * u
+		tt := t * t
+		ttt := tt * t
+		bx := uuu*x0 + 3*uu*t*x1 + 3*u*tt*x2 + ttt*x3
+		by := uuu*y0 + 3*uu*t*y1 + 3*u*tt*y2 + ttt*y3
+		return bx, by
+	}
+	dist := func(t float64) float64 {
+		bx, by := bez(t)
+		dx := bx - x0
+		dy := by - y0
+		return math.Sqrt(dx*dx + dy*dy)
+	}
+
+	// Check that the target is reachable along the chord.
+	if dist(1) < targetDist {
+		return x0, y0, x1, y1, x2, y2, false
+	}
+
+	lo, hi := 0.0, 1.0
+	for i := 0; i < 40; i++ {
+		mid := (lo + hi) / 2
+		if dist(mid) < targetDist {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	t := (lo + hi) / 2
+
+	// De Casteljau split at t.
+	// Linear interpolations on the control polygon.
+	lerp := func(a, b, k float64) float64 { return a + (b-a)*k }
+	p01x, p01y := lerp(x0, x1, t), lerp(y0, y1, t)
+	p12x, p12y := lerp(x1, x2, t), lerp(y1, y2, t)
+	p23x, p23y := lerp(x2, x3, t), lerp(y2, y3, t)
+	p012x, p012y := lerp(p01x, p12x, t), lerp(p01y, p12y, t)
+	p123x, p123y := lerp(p12x, p23x, t), lerp(p12y, p23y, t)
+	p0123x, p0123y := lerp(p012x, p123x, t), lerp(p012y, p123y, t)
+
+	// Second sub-curve: B(t), p123, p23, P3.
+	return p0123x, p0123y, p123x, p123y, p23x, p23y, true
 }
 
 // shortenPathEnd shortens the path at the end by the given amount.
@@ -1124,36 +1446,43 @@ func (r *GeometryResolver) shortenPathEnd(pathData string, shortenBy float64) st
 		endX, _ := parseFloat(parts[len(parts)-2])
 		endY, _ := parseFloat(parts[len(parts)-1])
 
-		// Compute tangent direction at curve endpoint
-		// For cubic Bezier: tangent at t=1 is (end - cp2)
+		// Find the start of this cubic from the preceding command/M to do
+		// proper de Casteljau subdivision. Same approach as shortenPathStart:
+		// shortening by a tangent-direction shift moves the endpoint along the
+		// straight chord rather than along the curve, which becomes visibly
+		// wrong when the setback exceeds the segment chord length.
+		startX, startY := r.findPrevPoint(prefix)
+		newStartX, newStartY, newCp1X, newCp1Y, newCp2X, newCp2Y, newEndX, newEndY, ok :=
+			subdivideCubicByChordFromEnd(startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY, shortenBy)
+		_ = newStartX
+		_ = newStartY
+		if ok {
+			newArgs := fmt.Sprintf("%s %s %s %s %s %s",
+				r.fmtNum(newCp1X), r.fmtNum(newCp1Y),
+				r.fmtNum(newCp2X), r.fmtNum(newCp2Y),
+				r.fmtNum(newEndX), r.fmtNum(newEndY))
+			return prefix + "C" + newArgs
+		}
+
+		// Fallback: linear move along end tangent (legacy behaviour).
 		dx := endX - cp2X
 		dy := endY - cp2Y
 		segmentLen := math.Sqrt(dx*dx + dy*dy)
-
-		// Only shorten if the segment is long enough
-		// If segment is shorter than setback, limit to segment length to avoid overshooting
 		effectiveShorten := shortenBy
 		if segmentLen > 0.01 && segmentLen < shortenBy {
-			effectiveShorten = segmentLen * 0.9 // Leave a small portion
+			effectiveShorten = segmentLen * 0.9
 		}
-
 		if segmentLen > 0.01 {
-			// Normalize direction
 			dx = dx / segmentLen
 			dy = dy / segmentLen
-
-			// Compute new endpoint moved back by effectiveShorten
 			newEndX := endX - dx*effectiveShorten
 			newEndY := endY - dy*effectiveShorten
-
-			// Move cp2 proportionally to maintain curve shape
 			cp2Ratio := effectiveShorten / segmentLen
 			if cp2Ratio > 0.5 {
 				cp2Ratio = 0.5
 			}
 			newCp2X := cp2X - dx*effectiveShorten*cp2Ratio
 			newCp2Y := cp2Y - dy*effectiveShorten*cp2Ratio
-
 			newArgs := fmt.Sprintf("%s %s %s %s %s %s",
 				r.fmtNum(cp1X), r.fmtNum(cp1Y),
 				r.fmtNum(newCp2X), r.fmtNum(newCp2Y),

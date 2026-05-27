@@ -15,8 +15,10 @@ type SVGEmitter struct {
 	node           *RenderNode
 	outW           float64
 	outH           float64
-	negativeWidth  bool // original shape had negative width (connector going left)
-	negativeHeight bool // original shape had negative height (connector going down)
+	scale          float64 // scale factor (pixels per inch)
+	negativeWidth  bool    // original shape had negative width (connector going left)
+	negativeHeight bool    // original shape had negative height (connector going down)
+	shadowFilterID string  // unique filter ID for shadows in this shape
 }
 
 // NewSVGEmitter creates a new emitter for the given render tree.
@@ -26,6 +28,7 @@ func NewSVGEmitter(node *RenderNode, outW, outH float64, precision int) *SVGEmit
 		node:      node,
 		outW:      outW,
 		outH:      outH,
+		scale:     72.0, // default: 72 pixels per inch
 	}
 }
 
@@ -37,6 +40,20 @@ func NewSVGEmitterWithNegative(node *RenderNode, outW, outH float64, precision i
 		node:           node,
 		outW:           outW,
 		outH:           outH,
+		scale:          72.0, // default: 72 pixels per inch
+		negativeWidth:  negW,
+		negativeHeight: negH,
+	}
+}
+
+// NewSVGEmitterWithScale creates an emitter with a custom scale factor.
+func NewSVGEmitterWithScale(node *RenderNode, outW, outH float64, precision int, scale float64, negW, negH bool) *SVGEmitter {
+	return &SVGEmitter{
+		precision:      precision,
+		node:           node,
+		outW:           outW,
+		outH:           outH,
+		scale:          scale,
 		negativeWidth:  negW,
 		negativeHeight: negH,
 	}
@@ -51,6 +68,7 @@ func (e *SVGEmitter) Emit() []byte {
 	markers := e.collectMarkers(e.node)
 	gradients := e.collectGradients(e.node)
 	shadows := e.collectShadows(e.node)
+	fillPatterns := e.collectFillPatterns(e.node)
 
 	// Calculate viewBox padding based on stroke widths and markers
 	maxStrokeWidth := e.findMaxStrokeWidth(e.node)
@@ -80,7 +98,13 @@ func (e *SVGEmitter) Emit() []byte {
 	svg.WriteByte('\n')
 
 	// Emit <defs> section
-	if len(markers) > 0 || len(gradients) > 0 || len(shadows) > 0 {
+	hasShadows := len(shadows) > 0
+	// Use shape ID to make filter ID unique when multiple shapes are combined
+	shadowFilterID := "shadow_blur"
+	if e.node.Shape != nil && e.node.Shape.ID != "" {
+		shadowFilterID = fmt.Sprintf("shadow_blur_%s", e.node.Shape.ID)
+	}
+	if len(markers) > 0 || len(gradients) > 0 || hasShadows || len(fillPatterns) > 0 {
 		svg.WriteString("  <defs>\n")
 		for _, m := range markers {
 			svg.WriteString(e.emitMarker(m))
@@ -91,13 +115,20 @@ func (e *SVGEmitter) Emit() []byte {
 			svg.WriteString(gradientToSVGDef(g, id, e.precision))
 			svg.WriteByte('\n')
 		}
-		for id, s := range shadows {
+		// Fill patterns for hatching (patterns 2-24)
+		for _, fp := range fillPatterns {
 			svg.WriteString("    ")
-			svg.WriteString(shadowToSVGFilter(s, id, 1.0, 1.0, e.precision))
+			svg.WriteString(fillPatternToSVG(fp.PatternType, fp.ID, fp.ForeColor, fp.BackColor, fp.Scale))
+			svg.WriteByte('\n')
+		}
+		// Single blur filter for shadows in this shape (unique ID per shape)
+		if hasShadows {
+			svg.WriteString(fmt.Sprintf(`    <filter id="%s"><feGaussianBlur stdDeviation="2"/></filter>`, shadowFilterID))
 			svg.WriteByte('\n')
 		}
 		svg.WriteString("  </defs>\n")
 	}
+	e.shadowFilterID = shadowFilterID // store for use in emitShadowPath
 
 	// Check for rotation on root shape
 	shapeAngle := toFloat(e.node.Shape.CellValue("Angle"))
@@ -173,6 +204,21 @@ func (e *SVGEmitter) collectShadowsRecursive(node *RenderNode, result map[string
 	}
 }
 
+func (e *SVGEmitter) collectFillPatterns(node *RenderNode) map[string]*FillPatternDef {
+	result := make(map[string]*FillPatternDef)
+	e.collectFillPatternsRecursive(node, result)
+	return result
+}
+
+func (e *SVGEmitter) collectFillPatternsRecursive(node *RenderNode, result map[string]*FillPatternDef) {
+	for id, fp := range node.FillPatterns {
+		result[id] = fp
+	}
+	for _, child := range node.Children {
+		e.collectFillPatternsRecursive(child, result)
+	}
+}
+
 func (e *SVGEmitter) findMaxStrokeWidth(node *RenderNode) float64 {
 	max := 0.0
 	e.findMaxStrokeWidthRecursive(node, &max)
@@ -207,7 +253,12 @@ func (e *SVGEmitter) emitMarker(m *MarkerDef) string {
 		orient = "auto-start-reverse"
 	}
 
-	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" markerUnits="strokeWidth" orient="%s"><path d="%s" fill="%s" stroke="%s"/></marker>`,
+	// preserveAspectRatio="none" lets the 10x10 path stretch to match
+	// markerWidth/markerHeight independently. Without it, the default
+	// "xMidYMid meet" forces uniform scaling, which squashes elongated
+	// arrows (e.g. type 13 with markerWidth=5.4, markerHeight=3.6) back
+	// into a square-aspect triangle - making "long" arrows look stubby.
+	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" markerUnits="strokeWidth" orient="%s" preserveAspectRatio="none"><path d="%s" fill="%s" stroke="%s"/></marker>`,
 		m.ID,
 		e.fmtNum(10), e.fmtNum(10), // viewBox dimensions (standard arrow size)
 		e.fmtNum(m.RefX), e.fmtNum(m.RefY),
@@ -244,12 +295,25 @@ func (e *SVGEmitter) emitGeometry(svg *strings.Builder, node *RenderNode) {
 		}
 	}
 
-	// Helper to emit this node's paths
+	// Helper to emit this node's paths (with shadows right before each path)
 	emitPaths := func() {
 		if len(validPaths) >= 2 && e.canCombinePaths(validPaths) {
+			// For compound paths, emit shadow for first path only
+			first := validPaths[0]
+			if first.FilterID != "" {
+				if shadow, ok := node.Shadows[first.FilterID]; ok {
+					e.emitShadowPath(svg, first, shadow)
+				}
+			}
 			e.emitCompoundPath(svg, validPaths)
 		} else {
 			for _, path := range validPaths {
+				// Emit shadow right before its path (like Visio)
+				if path.FilterID != "" {
+					if shadow, ok := node.Shadows[path.FilterID]; ok {
+						e.emitShadowPath(svg, path, shadow)
+					}
+				}
 				e.emitSinglePath(svg, path)
 			}
 		}
@@ -258,6 +322,7 @@ func (e *SVGEmitter) emitGeometry(svg *strings.Builder, node *RenderNode) {
 	// Visio renders children BEFORE parent geometry in groups.
 	// This ensures caps/overlays (parent geometry) appear on top of body shapes (children).
 	// Example: cylinder has body as child and ellipse cap as parent geometry.
+	// Shadows are rendered inline, right before each path.
 	emitChildren()
 	emitPaths()
 }
@@ -296,7 +361,12 @@ func (e *SVGEmitter) emitCompoundPath(svg *strings.Builder, paths []*ResolvedPat
 	first := paths[0]
 	var attrs []string
 
-	attrs = append(attrs, fmt.Sprintf(`fill="%s"`, first.Fill))
+	// Use fill pattern if available, otherwise use solid fill
+	if first.FillPatternID != "" {
+		attrs = append(attrs, fmt.Sprintf(`fill="url(#%s)"`, first.FillPatternID))
+	} else {
+		attrs = append(attrs, fmt.Sprintf(`fill="%s"`, first.Fill))
+	}
 	attrs = append(attrs, fmt.Sprintf(`stroke="%s"`, first.Stroke))
 	attrs = append(attrs, fmt.Sprintf(`stroke-width="%s"`, e.fmtNum(first.StrokeWidth)))
 
@@ -318,9 +388,7 @@ func (e *SVGEmitter) emitCompoundPath(svg *strings.Builder, paths []*ResolvedPat
 		attrs = append(attrs, `stroke-linecap="round"`)
 	}
 	attrs = append(attrs, `stroke-linejoin="round"`)
-	if first.FilterID != "" {
-		attrs = append(attrs, fmt.Sprintf(`filter="url(#%s)"`, first.FilterID))
-	}
+	// Note: FilterID is used for shadow lookup only, not applied to main path
 
 	svg.WriteString(fmt.Sprintf(`  <path d="%s" %s/>`, combinedD.String(), strings.Join(attrs, " ")))
 	svg.WriteByte('\n')
@@ -330,7 +398,12 @@ func (e *SVGEmitter) emitCompoundPath(svg *strings.Builder, paths []*ResolvedPat
 func (e *SVGEmitter) emitSinglePath(svg *strings.Builder, path *ResolvedPath) {
 	var attrs []string
 
-	attrs = append(attrs, fmt.Sprintf(`fill="%s"`, path.Fill))
+	// Use fill pattern if available, otherwise use solid fill
+	if path.FillPatternID != "" {
+		attrs = append(attrs, fmt.Sprintf(`fill="url(#%s)"`, path.FillPatternID))
+	} else {
+		attrs = append(attrs, fmt.Sprintf(`fill="%s"`, path.Fill))
+	}
 	attrs = append(attrs, fmt.Sprintf(`stroke="%s"`, path.Stroke))
 	attrs = append(attrs, fmt.Sprintf(`stroke-width="%s"`, e.fmtNum(path.StrokeWidth)))
 
@@ -355,12 +428,30 @@ func (e *SVGEmitter) emitSinglePath(svg *strings.Builder, path *ResolvedPath) {
 	if path.MarkerEndID != "" {
 		attrs = append(attrs, fmt.Sprintf(`marker-end="%s"`, path.MarkerEndID))
 	}
-	if path.FilterID != "" {
-		attrs = append(attrs, fmt.Sprintf(`filter="url(#%s)"`, path.FilterID))
-	}
+	// Note: FilterID is used for shadow lookup, not applied directly to path
 
 	svg.WriteString(fmt.Sprintf(`  <path d="%s" %s/>`, path.D, strings.Join(attrs, " ")))
 	svg.WriteByte('\n')
+}
+
+// emitShadowPath emits a shadow copy of the path (like Visio does)
+func (e *SVGEmitter) emitShadowPath(svg *strings.Builder, path *ResolvedPath, shadow *Shadow) {
+	// Calculate offset in SVG units
+	dx := shadow.OffsetX * e.scale
+	dy := -shadow.OffsetY * e.scale // flip Y for SVG
+
+	// Shadow opacity (from ShdwForegndTrans)
+	opacity := shadow.Opacity
+	if opacity == 0 {
+		opacity = 0.22 // default like Visio
+	}
+
+	// Emit shadow group with offset transform
+	svg.WriteString(fmt.Sprintf(`  <g transform="translate(%s,%s)" filter="url(#%s)">`,
+		e.fmtNum(dx), e.fmtNum(dy), e.shadowFilterID))
+	svg.WriteString(fmt.Sprintf(`<path d="%s" fill="%s" fill-opacity="%s" stroke="%s" stroke-opacity="%s" stroke-width="%s"/>`,
+		path.D, shadow.Color, e.fmtNum(opacity), shadow.Color, e.fmtNum(opacity), e.fmtNum(path.StrokeWidth)))
+	svg.WriteString("</g>\n")
 }
 
 func (e *SVGEmitter) emitText(svg *strings.Builder, node *RenderNode) {
@@ -384,6 +475,14 @@ func (e *SVGEmitter) emitText(svg *strings.Builder, node *RenderNode) {
 		}
 		if t.TextDecoration != "" {
 			svg.WriteString(fmt.Sprintf(` text-decoration="%s"`, t.TextDecoration))
+		}
+		if t.SmallCaps {
+			svg.WriteString(` font-variant="small-caps"`)
+		}
+		if t.TextPos == 1 { // Superscript
+			svg.WriteString(` baseline-shift="super" font-size="70%"`)
+		} else if t.TextPos == 2 { // Subscript
+			svg.WriteString(` baseline-shift="sub" font-size="70%"`)
 		}
 		if t.Transform != "" {
 			svg.WriteString(fmt.Sprintf(` transform="%s"`, t.Transform))
@@ -475,8 +574,8 @@ func EmitRenderTreeWithResult(shape *Shape, width, height float64, precision int
 		return nil, fmt.Errorf("failed to build render tree")
 	}
 
-	// Emit SVG with negative dimension flags for proper viewBox
-	emitter := NewSVGEmitterWithNegative(tree, outW, outH, precision, negW, negH)
+	// Emit SVG with scale and negative dimension flags for proper viewBox
+	emitter := NewSVGEmitterWithScale(tree, outW, outH, precision, scale, negW, negH)
 	svg := emitter.Emit()
 
 	// Determine brand color

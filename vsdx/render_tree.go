@@ -29,6 +29,17 @@ type RenderNode struct {
 	Gradients map[string]*Gradient
 	// Shadow filter definitions needed by this node
 	Shadows map[string]*Shadow
+	// Fill pattern definitions needed by this node (hatching patterns 2-24)
+	FillPatterns map[string]*FillPatternDef
+}
+
+// FillPatternDef contains a fill pattern definition for hatching.
+type FillPatternDef struct {
+	ID          string
+	PatternType int     // Visio pattern type (2-24)
+	ForeColor   string  // Pattern foreground color
+	BackColor   string  // Pattern background color
+	Scale       float64 // Pattern scale factor
 }
 
 // ResolvedPath contains pre-computed SVG path data ready for emission.
@@ -45,6 +56,7 @@ type ResolvedPath struct {
 	MarkerStartID string  // marker-start URL (empty if none)
 	MarkerEndID   string  // marker-end URL (empty if none)
 	GradientID    string  // gradient definition ID
+	FillPatternID string  // fill pattern ID for hatching (patterns 2-24)
 	FilterID      string  // filter (shadow) ID
 	NoShow        bool    // geometry-level hidden
 }
@@ -72,13 +84,15 @@ type ResolvedText struct {
 	FontFamily     string  // font family (e.g., "Calibri, sans-serif")
 	FontWeight     string  // "normal" or "bold"
 	FontStyle      string  // "normal" or "italic"
-	TextDecoration string  // "none", "underline", "line-through", or combined
+	TextDecoration string  // "none", "underline", "line-through", "overline", or combined
 	Fill           string  // text color
 	TextAnchor     string  // "start", "middle", or "end"
 	Baseline       string  // "hanging", "middle", or "alphabetic"
 	Transform      string  // rotation transform
 	Lines          []string // for multi-line text
 	LineHeight     float64
+	SmallCaps      bool    // render as small capitals
+	TextPos        int     // 0=normal, 1=superscript, 2=subscript
 }
 
 // RenderTreeBuilder builds a render tree from a shape hierarchy.
@@ -325,8 +339,20 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 			MarkerStartID: result.MarkerStart,
 			MarkerEndID:   result.MarkerEnd,
 			GradientID:    result.GradientID,
+			FillPatternID: result.FillPatternID,
 			FilterID:      result.FilterID,
 			NoShow:        result.NoShow,
+		}
+
+		// Collect fill pattern definitions
+		if result.FillPatternID != "" {
+			if node.FillPatterns == nil {
+				node.FillPatterns = make(map[string]*FillPatternDef)
+			}
+			patDef := createFillPatternDef(style.FillPattern, style.FillForegnd, style.FillBkgnd)
+			if patDef != nil {
+				node.FillPatterns[patDef.ID] = patDef
+			}
 		}
 
 		// Track colors for brand detection
@@ -359,30 +385,23 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 			node.Gradients[gradID] = gradient
 		}
 
-		// Check for shadow - apply default theme shadow to filled shapes
-		// Skip connectors and shapes without visible fill
-		actualFill := result.Fill
-		hasFill := actualFill != "" && actualFill != "none" && !strings.HasPrefix(actualFill, "url(")
-		isConnector := shape.IsConnector()
+		// Create shadow if enabled
 		if style.HasShadow() {
-			if shadow := shape.ShapeShadow(); shadow != nil {
-				shadowID := fmt.Sprintf("shadow_%s", shape.ID)
-				path.FilterID = shadowID
-				node.Shadows[shadowID] = shadow
-			}
-		} else if hasFill && !isConnector {
-			// Apply default theme shadow to filled shapes
+			shadowID := fmt.Sprintf("shadow_%s_%d", shape.ID, geomIndex)
 			shadow := &Shadow{
-				Type:    1,     // simple shadow
-				Color:   "#5B9BD5",
-				Opacity: 0.22,  // 22% opacity
-				OffsetX: 0.118, // ~8.5 points / 72
-				OffsetY: -0.118,
-				Blur:    2.0,
+				Type:    style.ShapeShdwType,
+				OffsetX: style.ShapeShdwOffsetX / 72.0, // points to inches
+				OffsetY: style.ShapeShdwOffsetY / 72.0, // points to inches
+				Color:   style.ShdwForegnd,
+				Opacity: style.ShadowOpacity(),
+				Blur:    style.ShapeShdwBlur / 72.0, // points to inches
+				Scale:   style.ShapeShdwScaleFactor,
 			}
-			shadowID := fmt.Sprintf("shadow_%s", shape.ID)
-			path.FilterID = shadowID
+			if shadow.Color == "" {
+				shadow.Color = "#808080"
+			}
 			node.Shadows[shadowID] = shadow
+			path.FilterID = shadowID
 		}
 
 		paths = append(paths, path)
@@ -416,20 +435,29 @@ func (b *RenderTreeBuilder) createMarkerDef(arrowType, arrowSize int, color stri
 		lengthMult = 1.0
 	}
 
-	// Base dimensions in strokeWidth units
-	// Standard scale gives 3.6 strokeWidth units, but we want minimum 7 visual units
-	baseScale := 0.36 * sizeMult
-	minVisualWidth := 7.0 * sizeMult * lengthMult  // minimum visual size
-	baseVisualWidth := def.Width * baseScale * lengthMult * strokeWidth
-
-	// Calculate scale factor ensuring minimum visual size
-	var scaleFactor float64
-	if baseVisualWidth >= minVisualWidth || strokeWidth == 0 {
-		scaleFactor = baseScale
+	// Use the same affine fit as computeArrowSetback so the marker's visible
+	// width equals the setback - this is what Visio does (the arrow tip lands
+	// exactly at the connector's logical endpoint).
+	//
+	//   visualWidth_abs = lengthMult * sizeMult * (5.17 + 1.85 * sw)
+	//
+	// To get markerWidth in stroke-width units we divide by sw. With markerUnits
+	// = "strokeWidth" the rendered marker then occupies visualWidth_abs path
+	// units (since markerWidth × sw = visualWidth_abs).
+	visualWidthAbs := lengthMult * sizeMult * (5.17 + 1.85*strokeWidth)
+	var markerWidthSU float64
+	if strokeWidth > 0 {
+		markerWidthSU = visualWidthAbs / strokeWidth
 	} else {
-		// For thin strokes, use larger marker to meet minimum visual size
-		scaleFactor = minVisualWidth / (def.Width * lengthMult * strokeWidth)
+		markerWidthSU = 7.0 * sizeMult * lengthMult
 	}
+
+	// markerHeight is the marker's extent PERPENDICULAR to the line. The
+	// lengthMult elongates the marker ALONG the line (longer arrow) but does
+	// NOT widen it. So height = width / lengthMult to preserve Visio's actual
+	// rendered aspect ratio for elongated arrows (type 13/14 are 1.5x longer
+	// than wide; without this division they'd render as a too-tall triangle).
+	markerHeightSU := markerWidthSU / lengthMult
 
 	pos := "start"
 	if isEnd {
@@ -446,8 +474,8 @@ func (b *RenderTreeBuilder) createMarkerDef(arrowType, arrowSize int, color stri
 		Color:     color,
 		IsEnd:     isEnd,
 		Path:      def.Path,
-		Width:     def.Width * scaleFactor * lengthMult,
-		Height:    def.Height * scaleFactor,
+		Width:     markerWidthSU,
+		Height:    markerHeightSU,
 		RefX:      def.RefX,
 		RefY:      def.RefY,
 		Filled:    def.Filled,
@@ -488,17 +516,24 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		text.FontStyle = "italic"
 	}
 
-	// Text decoration (underline and/or strikethrough)
+	// Text decoration (underline, strikethrough, overline)
 	var decorations []string
 	if style.Underline {
 		decorations = append(decorations, "underline")
 	}
-	if style.Strikethrough {
+	if style.Overline {
+		decorations = append(decorations, "overline")
+	}
+	if style.Strikethrough || style.DoubleStrikethrough {
 		decorations = append(decorations, "line-through")
 	}
 	if len(decorations) > 0 {
 		text.TextDecoration = strings.Join(decorations, " ")
 	}
+
+	// Small caps and text position (superscript/subscript)
+	text.SmallCaps = style.SmallCaps
+	text.TextPos = style.TextPos
 
 	// Shape dimensions
 	shapeW := math.Abs(shape.Width())

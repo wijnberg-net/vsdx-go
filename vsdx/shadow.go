@@ -18,9 +18,13 @@ type Shadow struct {
 }
 
 // ShapeShadow returns the shadow settings for the shape.
-// Returns nil if shadow is not enabled (ShdwType=0).
+// Returns nil if shadow is not enabled (ShapeShdwType=0).
+// Note: MS-VSDX has two sets of shadow cells:
+// - "Shdw*" cells for color/pattern (ShdwForegnd, ShdwForegndTrans)
+// - "ShapeShdw*" cells for geometry (ShapeShdwType, ShapeShdwOffsetX/Y, etc.)
 func (s *Shape) ShapeShadow() *Shadow {
-	shdwType := int(toFloat(s.CellValue("ShdwType")))
+	// Check ShapeShdwType (shape-level shadow type)
+	shdwType := int(toFloat(s.CellValue("ShapeShdwType")))
 	if shdwType == 0 {
 		return nil
 	}
@@ -29,11 +33,11 @@ func (s *Shape) ShapeShadow() *Shadow {
 		Type: shdwType,
 	}
 
-	// Get shadow offsets.
-	shadow.OffsetX = toFloat(s.CellValue("ShdwOffsetX"))
-	shadow.OffsetY = toFloat(s.CellValue("ShdwOffsetY"))
+	// Get shadow offsets from ShapeShdw* cells (in inches)
+	shadow.OffsetX = toFloat(s.CellValue("ShapeShdwOffsetX"))
+	shadow.OffsetY = toFloat(s.CellValue("ShapeShdwOffsetY"))
 
-	// Get shadow color.
+	// Get shadow color from Shdw* cells
 	shadow.Color = resolveColor(s.CellValue("ShdwForegnd"))
 	if shadow.Color == "" {
 		shadow.Color = "#000000" // Default black shadow
@@ -53,18 +57,17 @@ func (s *Shape) ShapeShadow() *Shadow {
 		shadow.Opacity = 0.5
 	}
 
-	// Get blur radius.
-	shadow.Blur = toFloat(s.CellValue("ShdwBlur"))
-	if shadow.Blur == 0 {
-		shadow.Blur = 0.05 // Default small blur (in inches)
-	}
+	// Note: ShapeShdwBlur is ignored because Visio's SVG export renders
+	// sharp shadows (via duplicated paths) rather than blurred ones.
+	// Setting blur=0 matches the golden SVG output more closely.
+	shadow.Blur = 0
 
-	// Get oblique shadow settings.
-	shadow.Scale = toFloat(s.CellValue("ShdwScaleFactor"))
+	// Get oblique shadow settings
+	shadow.Scale = toFloat(s.CellValue("ShapeShdwScaleFactor"))
 	if shadow.Scale == 0 {
 		shadow.Scale = 1.0
 	}
-	shadow.ObliqueAng = toFloat(s.CellValue("ShdwObliqueAngle"))
+	shadow.ObliqueAng = toFloat(s.CellValue("ShapeShdwObliqueAngle"))
 
 	return shadow
 }

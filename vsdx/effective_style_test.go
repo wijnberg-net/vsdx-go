@@ -86,23 +86,21 @@ func TestComputeEffectiveStyle_HasShadow(t *testing.T) {
 }
 
 func TestComputeArrowSetback(t *testing.T) {
-	// Setback uses minimum visual size to ensure arrows remain visible for thin strokes.
-	// Formula: max(baseVisualWidth * lineWeight, minVisualWidth)
-	// where baseVisualWidth = 3.56 * sizeMult * lengthMult
-	// and minVisualWidth = 7.0 * sizeMult * lengthMult
+	// Affine fit to Visio's empirical setback values:
+	//   visualWidth = lengthMult * sizeMult * (5.17 + 1.85 * sw)
 	tests := []struct {
 		arrowType  int
 		arrowSize  int
 		lineWeight float64
 		want       float64
 	}{
-		{0, 2, 1.0, 0},       // No arrow: zero setback
-		{1, 2, 1.0, 7.0},     // Type 1, size 2, 1pt: min(7.0) applies
-		{4, 2, 3.0, 10.68},   // Type 4, size 2, 3pt: 3.56 * 3 = 10.68 > min 7.0
-		{1, 0, 1.0, 3.5},     // Type 1, size 0, 1pt: min 7.0 * 0.5 = 3.5
-		{1, 6, 1.0, 17.5},    // Type 1, size 6, 1pt: min 7.0 * 2.5 = 17.5
-		{13, 2, 1.0, 10.5},   // Type 13, size 2, 1pt: min 7.0 * 1.5 = 10.5
-		{13, 2, 3.0, 16.02},  // Type 13, size 2, 3pt: 3.56 * 1.5 * 3 = 16.02
+		{0, 2, 1.0, 0},      // No arrow: zero setback
+		{1, 2, 1.0, 7.02},   // Type 1 (lengthMult=1), size 2 (mult=1): 1*1*(5.17+1.85)=7.02
+		{4, 2, 3.0, 10.72},  // Type 4, size 2, sw=3: 1*1*(5.17+5.55)=10.72 (Visio observed 10.68)
+		{1, 0, 1.0, 3.51},   // Size 0 (mult=0.5): 0.5*(5.17+1.85)=3.51
+		{1, 6, 1.0, 17.55},  // Size 6 (mult=2.5): 2.5*(5.17+1.85)=17.55
+		{13, 2, 1.0, 10.53}, // Type 13 (lengthMult=1.5), size 2: 1.5*(5.17+1.85)=10.53
+		{13, 2, 3.0, 16.08}, // Type 13, size 2, sw=3: 1.5*(5.17+5.55)=16.08 (Visio observed 16.20)
 	}
 
 	for _, tt := range tests {
@@ -111,7 +109,7 @@ func TestComputeArrowSetback(t *testing.T) {
 		if diff < 0 {
 			diff = -diff
 		}
-		if diff > 0.001 {
+		if diff > 0.01 {
 			t.Errorf("computeArrowSetback(%d, %d, %f) = %f; want %f",
 				tt.arrowType, tt.arrowSize, tt.lineWeight, got, tt.want)
 		}

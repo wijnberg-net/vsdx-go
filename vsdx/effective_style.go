@@ -30,6 +30,9 @@ type EffectiveStyle struct {
 	FillForegndTrans float64 // Foreground transparency 0-1
 	FillBkgndTrans   float64 // Background transparency 0-1
 
+	// Geometry properties
+	Rounding float64 // Corner rounding radius in inches
+
 	// Shadow properties
 	ShdwForegnd       string  // Shadow color
 	ShdwForegndTrans  float64 // Shadow transparency
@@ -41,13 +44,17 @@ type EffectiveStyle struct {
 
 	// Text properties
 	TextColor     string  // Text color
-	FontSize      float64 // Font size in points
-	FontID        int     // Font table index
-	Bold          bool
-	Italic        bool
-	Underline     bool
-	Strikethrough bool
-	TextAlign     int // 0=left, 1=center, 2=right
+	FontSize          float64 // Font size in points
+	FontID            int     // Font table index
+	Bold              bool
+	Italic            bool
+	Underline         bool
+	Strikethrough     bool
+	DoubleStrikethrough bool
+	SmallCaps         bool
+	Overline          bool
+	TextPos           int     // 0=normal, 1=superscript, 2=subscript
+	TextAlign         int     // 0=left, 1=center, 2=right
 
 	// Geometry visibility
 	NoLine bool // Hide line
@@ -105,8 +112,8 @@ func (es *EffectiveStyle) resolveLineProperties(s *Shape) {
 		es.LineWeight = v * 72.0 // inches to points
 	}
 
-	// LinePattern
-	if v := s.resolveIntCell("LinePattern"); v >= 0 {
+	// LinePattern (254 = use master formula, treat as unset to fall through to default)
+	if v := s.resolveIntCell("LinePattern"); v >= 0 && v != 254 {
 		es.LinePattern = v
 	}
 
@@ -123,8 +130,8 @@ func (es *EffectiveStyle) resolveLineProperties(s *Shape) {
 
 // resolveArrowProperties resolves arrow/marker properties.
 func (es *EffectiveStyle) resolveArrowProperties(s *Shape) {
-	// BeginArrow
-	if v := s.resolveIntCell("BeginArrow"); v >= 0 {
+	// BeginArrow (254 = use master formula, treat as unset to fall through)
+	if v := s.resolveIntCell("BeginArrow"); v >= 0 && v != 254 {
 		es.BeginArrow = v
 		es.ArrowSource = "cell"
 	} else if v := s.resolveThemeArrow("Begin"); v > 0 {
@@ -132,8 +139,8 @@ func (es *EffectiveStyle) resolveArrowProperties(s *Shape) {
 		es.ArrowSource = "theme"
 	}
 
-	// EndArrow
-	if v := s.resolveIntCell("EndArrow"); v >= 0 {
+	// EndArrow (254 = use master formula, treat as unset to fall through)
+	if v := s.resolveIntCell("EndArrow"); v >= 0 && v != 254 {
 		es.EndArrow = v
 	} else if v := s.resolveThemeArrow("End"); v > 0 {
 		es.EndArrow = v
@@ -181,6 +188,11 @@ func (es *EffectiveStyle) resolveFillProperties(s *Shape) {
 	if v := s.resolveNumericCell("FillBkgndTrans"); v >= 0 {
 		es.FillBkgndTrans = v
 	}
+
+	// Rounding (corner radius in inches)
+	if v := s.resolveNumericCell("Rounding"); v > 0 {
+		es.Rounding = v
+	}
 }
 
 // resolveShadowProperties resolves shadow-related properties.
@@ -200,13 +212,14 @@ func (es *EffectiveStyle) resolveShadowProperties(s *Shape) {
 		es.ShapeShdwType = v
 	}
 
-	// ShapeShdwOffsetX (inches to points)
-	if v := s.resolveNumericCell("ShapeShdwOffsetX"); v != 0 {
+	// ShapeShdwOffsetX (inches to points). Shadow offsets can be negative.
+	if v, ok := s.resolveSignedNumericCell("ShapeShdwOffsetX"); ok {
 		es.ShapeShdwOffsetX = v * 72.0
 	}
 
-	// ShapeShdwOffsetY (inches to points)
-	if v := s.resolveNumericCell("ShapeShdwOffsetY"); v != 0 {
+	// ShapeShdwOffsetY (inches to points). Shadow offsets can be negative
+	// (Visio convention: negative Y = shadow drops downward in screen space).
+	if v, ok := s.resolveSignedNumericCell("ShapeShdwOffsetY"); ok {
 		es.ShapeShdwOffsetY = v * 72.0
 	}
 
@@ -219,6 +232,66 @@ func (es *EffectiveStyle) resolveShadowProperties(s *Shape) {
 	if v := s.resolveNumericCell("ShapeShdwScaleFactor"); v > 0 {
 		es.ShapeShdwScaleFactor = v
 	}
+
+	// Theme effects fallback (MS-VSDX §2.2.7.4.3 QuickStyle effects matrix).
+	// When the shape's ShapeShdw* cells resolve to "Themed" the values end
+	// up at zero here. If the shape uses theme styling (QuickStyleType > 0
+	// from shape or master) and the theme defines an outerShdw, apply it.
+	// We do NOT override values that were resolved to non-zero explicitly.
+	if es.ShapeShdwType == 0 && es.ShapeShdwOffsetX == 0 && es.ShapeShdwOffsetY == 0 {
+		if shouldUseThemeShadow(s) {
+			_, offX, offY, blur := s.ThemeShadow()
+			if offX != 0 || offY != 0 {
+				es.ShapeShdwType = 1
+				es.ShapeShdwOffsetX = offX
+				es.ShapeShdwOffsetY = -offY // Theme dir is screen-clockwise; cell convention is upward-positive.
+				if blur > 0 {
+					es.ShapeShdwBlur = blur
+				}
+				// Color: theme outerShdw uses phClr (placeholder, resolved per
+			// shape). Visio's behaviour is to tint the shadow with the shape's
+			// fill color rather than render opaque black. We mirror that.
+			// (Resolving the proper QuickStyleEffectsMatrix → varColor chain
+			// is left for a later pass; the fill is close enough at 22% alpha.)
+			if es.FillForegnd != "" && es.FillForegnd != "#FFFFFF" {
+				es.ShdwForegnd = es.FillForegnd
+			}
+				// Theme alpha was parsed into ShadowTransparency (0..1).
+				if effects := s.themeEffects(); effects != nil && effects.ShadowTransparency > 0 {
+					es.ShdwForegndTrans = effects.ShadowTransparency
+				}
+			}
+		}
+	}
+}
+
+// shouldUseThemeShadow reports whether the shape participates in the theme
+// effects matrix and therefore should receive the theme's outerShdw when its
+// own ShapeShdw* cells resolve to "Themed".
+func shouldUseThemeShadow(s *Shape) bool {
+	// QuickStyleType > 0 marks shapes/masters that use theme styling.
+	if t := int(toFloat(s.CellValue("QuickStyleType"))); t > 0 {
+		return true
+	}
+	// Master may carry QuickStyleType when the shape doesn't.
+	if m := s.MasterShape(); m != nil {
+		if t := int(toFloat(m.CellValue("QuickStyleType"))); t > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// themeEffects exposes the parsed theme effects (including transparency).
+func (s *Shape) themeEffects() *ThemeEffects {
+	if s.Page == nil || s.Page.vis == nil {
+		return nil
+	}
+	theme := s.Page.vis.Theme()
+	if theme == nil {
+		return nil
+	}
+	return theme.ThemeEffects()
 }
 
 // resolveTextProperties resolves text-related properties.
@@ -244,18 +317,31 @@ func (es *EffectiveStyle) resolveTextProperties(s *Shape) {
 		es.FontID = int(toFloat(font))
 	}
 
-	// Style (bold/italic/underline from Style cell bitmask)
-	// Bit 1=Bold, 2=Italic, 4=Underline
+	// Style (bold/italic/underline/smallcaps from Style cell bitmask)
+	// Bit 0x01=Bold, 0x02=Italic, 0x04=Underline, 0x08=SmallCaps
 	if style := s.CellValue("Char.Style"); style != "" {
 		styleVal := int(toFloat(style))
-		es.Bold = (styleVal & 1) != 0
-		es.Italic = (styleVal & 2) != 0
-		es.Underline = (styleVal & 4) != 0
+		es.Bold = (styleVal & 0x01) != 0
+		es.Italic = (styleVal & 0x02) != 0
+		es.Underline = (styleVal & 0x04) != 0
+		es.SmallCaps = (styleVal & 0x08) != 0
 	}
 
-	// Strikethrough from Character section
+	// Strikethrough from Character section (1=single, 2=double)
 	if strikethru := s.CellValue("Char.Strikethru"); strikethru != "" && strikethru != "0" {
-		es.Strikethrough = true
+		strikethruVal := int(toFloat(strikethru))
+		es.Strikethrough = strikethruVal >= 1
+		es.DoubleStrikethrough = strikethruVal == 2
+	}
+
+	// Overline from Character section
+	if overline := s.CellValue("Char.Overline"); overline != "" && overline != "0" {
+		es.Overline = true
+	}
+
+	// Text position (0=normal, 1=superscript, 2=subscript)
+	if pos := s.CellValue("Char.Pos"); pos != "" {
+		es.TextPos = int(toFloat(pos))
 	}
 
 	// Paragraph alignment
@@ -374,6 +460,39 @@ func (s *Shape) resolveIntCell(cellName string) int {
 		return int(v)
 	}
 	return -1
+}
+
+// resolveSignedNumericCell is like resolveNumericCell but preserves negative
+// values. The existing resolveNumericCell uses -1 as a "not found / themed"
+// sentinel, which conflates legitimate negative cell values (such as
+// ShapeShdwOffsetY) with the sentinel.
+// Returns (value, true) if the cell resolved to a number; (0, false) otherwise.
+func (s *Shape) resolveSignedNumericCell(cellName string) (float64, bool) {
+	if v := s.CellValueLocal(cellName); v != "" && !isThemedValue(v) {
+		return toFloat(v), true
+	}
+	if master := s.MasterShape(); master != nil {
+		if v := master.CellValueLocal(cellName); v != "" && !isThemedValue(v) {
+			return toFloat(v), true
+		}
+	}
+	if v := s.ResolveStyleValue(cellName); v != "" && !isThemedValue(v) {
+		return toFloat(v), true
+	}
+	return 0, false
+}
+
+// isThemedValue reports whether a cell value string is a theme placeholder.
+func isThemedValue(v string) bool {
+	v = strings.TrimSpace(v)
+	if strings.EqualFold(v, "Themed") {
+		return true
+	}
+	upper := strings.ToUpper(v)
+	if strings.HasPrefix(upper, "THEMEVAL(") || strings.HasPrefix(upper, "THEMEGUARD(") {
+		return true
+	}
+	return false
 }
 
 // evaluateCellValue evaluates a cell value that may contain a formula.
@@ -705,37 +824,41 @@ func (s *Shape) resolveFontStyleColor() string {
 // The setback ensures the arrow body is visible and the tip reaches the shape edge.
 // With refX=0, the arrow tip extends forward by the marker width, so we shorten
 // the path by approximately the same amount.
+//
+// Visio's empirical setback for arrow size 2 (medium) across multiple stroke
+// widths fits the affine formula
+//
+//	visualWidth ≈ lengthMult * sizeMult * (5.17 + 1.85 * sw)   [abs path units]
+//
+// This was reverse-engineered from Visio's exported SVG markers:
+//
+//	type 4 size 2 sw=1.0 → setback 7.04   |  formula 7.02
+//	type 4 size 2 sw=3.0 → setback 10.68  |  formula 10.72
+//	type 13 size 2 sw=0.75 → setback 9.81 |  formula 9.84
+//	type 13 size 2 sw=2.25 → setback 14.31 |  formula 14.0
+//	type 13 size 2 sw=3.0 → setback 16.20 |  formula 16.20
+//
+// The previous purely-multiplicative formula (3.56 * sw, floored at 7) was off
+// by 2+ abs units for medium stroke weights, leaving the marker tip floating
+// inside the source shape on connectors like Device Registry → Cloud Gateway
+// in reference-architecture.
 func computeArrowSetback(arrowType, arrowSize int, lineWeight float64) float64 {
 	if arrowType == 0 {
 		return 0
 	}
 
-	// Size multipliers from MS-VSDX spec
 	sizeMultipliers := []float64{0.5, 0.7, 1.0, 1.3, 1.6, 2.0, 2.5}
 	sizeIdx := arrowSize
 	if sizeIdx < 0 || sizeIdx >= len(sizeMultipliers) {
 		sizeIdx = 2 // default medium
 	}
+	sizeMult := sizeMultipliers[sizeIdx]
 
-	// Length multiplier per arrow type (matching visioArrowTypes in svg.go)
-	// Type 13, 14 are longer arrows (1.5x), others are standard (1.0x)
-	lengthMult := 1.0
-	if arrowType == 13 || arrowType == 14 {
-		lengthMult = 1.5
-	}
+	lengthMult := ArrowLengthMult(arrowType)
 
-	// Base visual arrow width (at 1pt stroke)
-	// Visio uses ~7 visual units as minimum, scales up with stroke weight
-	baseVisualWidth := 3.56 * sizeMultipliers[sizeIdx] * lengthMult
-	minVisualWidth := 7.0 * sizeMultipliers[sizeIdx] * lengthMult
-
-	// Calculate visual width: max(minimum, scaled by stroke weight)
-	visualWidth := baseVisualWidth * lineWeight
-	if visualWidth < minVisualWidth {
-		visualWidth = minVisualWidth
-	}
-
-	// Return setback in points (matches markerWidth * strokeWidth for SVG)
+	// Affine fit: marker visible width grows roughly 5.17 sw-units base + 1.85
+	// abs units per stroke-width increment.
+	visualWidth := lengthMult * sizeMult * (5.17 + 1.85*lineWeight)
 	return visualWidth
 }
 

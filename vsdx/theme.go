@@ -283,36 +283,76 @@ func parseThemeEffects(fmtScheme *etree.Element) ThemeEffects {
 		return effects
 	}
 
-	// Get the first effect style (typically the default).
-	effectStyle := effectStyleLst.FindElement("effectStyle")
-	if effectStyle == nil {
-		effectStyle = effectStyleLst.FindElement("a:effectStyle")
+	// effectStyleLst typically contains 6 entries. The first 3 are usually
+	// empty (subtle/no shadow); the later entries carry the actual outer
+	// shadow definitions referenced via QuickStyleEffectsMatrix. Scan for
+	// the first entry that has an outerShdw so the theme shadow is
+	// discoverable without QuickStyle matrix resolution.
+	var effectLst *etree.Element
+	for _, child := range effectStyleLst.ChildElements() {
+		tag := child.Tag
+		if tag != "effectStyle" {
+			continue
+		}
+		lst := child.FindElement("effectLst")
+		if lst == nil {
+			lst = child.FindElement("a:effectLst")
+		}
+		if lst == nil {
+			continue
+		}
+		if lst.FindElement("outerShdw") != nil || lst.FindElement("a:outerShdw") != nil {
+			effectLst = lst
+			break
+		}
+		// Remember the first non-nil effectLst as fallback (for glow/reflection/etc).
+		if effectLst == nil {
+			effectLst = lst
+		}
 	}
-	if effectStyle == nil {
+	if effectLst == nil {
 		return effects
 	}
 
-	effectLst := effectStyle.FindElement("effectLst")
-	if effectLst == nil {
-		effectLst = effectStyle.FindElement("a:effectLst")
-	}
-	if effectLst == nil {
-		return effects
-	}
-
-	// Parse outer shadow.
+	// Parse outer shadow (OOXML <a:outerShdw> in theme1.xml).
+	// - blurRad / dist are in EMUs (914400 per inch, 12700 per point).
+	// - dir is the shadow direction in 60000ths of a degree, measured
+	//   clockwise from the +X axis, so the X/Y offsets must be derived
+	//   from dist + dir, not from dist alone.
+	// - alpha (under the color child) is in thousandths (e.g. 22000 = 22%).
 	outerShdw := effectLst.FindElement("outerShdw")
 	if outerShdw == nil {
 		outerShdw = effectLst.FindElement("a:outerShdw")
 	}
 	if outerShdw != nil {
 		effects.ShadowBlur = parseEmu(outerShdw.SelectAttrValue("blurRad", "0"))
-		effects.ShadowOffsetX = parseEmu(outerShdw.SelectAttrValue("dist", "0"))
-		// Extract color from shadow.
-		if srgb := outerShdw.FindElement("a:srgbClr"); srgb != nil {
-			effects.ShadowColor = "#" + srgb.SelectAttrValue("val", "000000")
-		} else if srgb := outerShdw.FindElement("srgbClr"); srgb != nil {
-			effects.ShadowColor = "#" + srgb.SelectAttrValue("val", "000000")
+		dist := parseEmu(outerShdw.SelectAttrValue("dist", "0"))
+		dirDeg := toFloat(outerShdw.SelectAttrValue("dir", "0")) / 60000.0
+		rad := dirDeg * math.Pi / 180.0
+		effects.ShadowOffsetX = dist * math.Cos(rad)
+		// Theme dir is measured clockwise (screen convention) so a positive
+		// sin value already means "downward" in SVG coordinates. The shape
+		// cell convention however stores OffsetY upward-positive, so we
+		// keep the sign positive here and flip when needed at use site.
+		effects.ShadowOffsetY = dist * math.Sin(rad)
+		// Extract color + alpha. The outerShdw can use either srgbClr (explicit
+		// color) or schemeClr (typically "phClr" placeholder - resolved per-shape
+		// via QuickStyleShadowColor). For our theme-level fields we only store
+		// the explicit srgb color; transparency lives on both color element types.
+		var clrElem *etree.Element
+		for _, child := range outerShdw.ChildElements() {
+			switch child.Tag {
+			case "srgbClr":
+				effects.ShadowColor = "#" + child.SelectAttrValue("val", "000000")
+				clrElem = child
+			case "schemeClr":
+				clrElem = child
+			}
+		}
+		if clrElem != nil {
+			if alpha := clrElem.FindElement("alpha"); alpha != nil {
+				effects.ShadowTransparency = 1.0 - toFloat(alpha.SelectAttrValue("val", "100000"))/100000.0
+			}
 		}
 	}
 
