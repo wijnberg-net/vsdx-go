@@ -817,9 +817,15 @@ func (v *VisioFile) createPage(pageContentXML string, pageName string, pageElem 
 
 // --- Connector creation ---
 
-// ConnectShapes creates a new connector shape between fromShape and toShape on the given page.
-// Returns the connector Shape, or an error.
+// ConnectShapes creates a new straight connector between fromShape and toShape.
+// For other styles, use ConnectShapesWithStyle.
 func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape, error) {
+	return v.ConnectShapesWithStyle(page, fromShape, toShape, "straight")
+}
+
+// ConnectShapesWithStyle creates a new connector of the requested style
+// ("straight" or "curved") between fromShape and toShape on the given page.
+func (v *VisioFile) ConnectShapesWithStyle(page *Page, fromShape, toShape *Shape, style string) (*Shape, error) {
 	// Cache media template — opening embedded ZIP per call is expensive at scale.
 	if v.cachedMedia == nil {
 		m, err := NewMedia()
@@ -830,10 +836,17 @@ func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape
 	}
 	media := v.cachedMedia
 
-	// Copy straight connector template to destination page
-	connectorTemplate := media.StraightConnector()
+	var connectorTemplate *Shape
+	switch style {
+	case "curved":
+		connectorTemplate = media.CurvedConnector()
+	case "straight", "":
+		connectorTemplate = media.StraightConnector()
+	default:
+		return nil, fmt.Errorf("unknown connector style %q (want \"straight\" or \"curved\")", style)
+	}
 	if connectorTemplate == nil {
-		return nil, fmt.Errorf("straight connector not found in media template")
+		return nil, fmt.Errorf("connector template %q not found in media", style)
 	}
 
 	connectorElem := v.CopyShape(connectorTemplate.XML(), page)
@@ -876,6 +889,23 @@ func (v *VisioFile) ConnectShapes(page *Page, fromShape, toShape *Shape) (*Shape
 
 	page.AddConnect(newConnect(endConnectElem, page))
 	page.AddConnect(newConnect(begConnectElem, page))
+
+	// Remap the connector's Master attribute. The template carried the master
+	// ID from the embedded media file, which after CopyShape almost certainly
+	// collides with an unrelated master in the destination (e.g. "Rounded
+	// Rectangle" at ID 2). Without this, the new connector inherits the wrong
+	// geometry and renders as a rounded blob instead of a line. We look up
+	// the "Dynamic connector" master in the target — it's the right master
+	// for both straight and curved variants because the style differences
+	// live in the connector shape's own cells, not the master geometry.
+	if dynMaster := v.GetMasterPage("Dynamic connector"); dynMaster != nil {
+		connShape.SetMasterPageID(dynMaster.PageID())
+	} else {
+		// No matching master in target. Strip the Master attribute so the
+		// connector falls back to its own geometry rather than inheriting
+		// some unrelated shape's geometry.
+		connShape.SetMasterPageID("")
+	}
 
 	// Position the connector between the shapes
 	fromCX, fromCY := fromShape.CenterXY()
