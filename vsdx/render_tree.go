@@ -282,9 +282,27 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 	var paths []*ResolvedPath
 
 	geoms := shape.Geometries
-	if len(geoms) == 0 {
-		if ms := shape.MasterShape(); ms != nil {
-			geoms = ms.Geometries
+	// inheritScaleX/Y bridges master-local geometry coords into the instance's
+	// frame. The resolver applies this PER ROW: only rows whose XML lives in
+	// the master's section (i.e. inherited references) get scaled; rows in
+	// the local section keep their coords as-is. So we compute the scale
+	// whenever a master exists, even when the shape has a partial local
+	// section that inherits some rows.
+	inheritScaleX, inheritScaleY := 1.0, 1.0
+	masterShape := shape.MasterShape()
+	if len(geoms) == 0 && masterShape != nil {
+		geoms = masterShape.Geometries
+	}
+	if masterShape != nil {
+		masterW := math.Abs(masterShape.Width())
+		masterH := math.Abs(masterShape.Height())
+		instW := math.Abs(shape.Width())
+		instH := math.Abs(shape.Height())
+		if masterW > 0 && instW > 0 {
+			inheritScaleX = instW / masterW
+		}
+		if masterH > 0 && instH > 0 {
+			inheritScaleY = instH / masterH
 		}
 	}
 
@@ -313,7 +331,7 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 		// The legacy renderer uses the top-level shape's height for ALL shapes,
 		// regardless of nesting. This ensures correct Y-flip when offsetY
 		// accumulates across multiple hierarchy levels.
-		result := ResolveGeometry(
+		result := ResolveGeometryWithInherit(
 			shape,
 			geom,
 			style,
@@ -324,6 +342,7 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 			negativeH,
 			b.precision,
 			geomIndex, totalGeoms,
+			inheritScaleX, inheritScaleY,
 		)
 		geomIndex++
 

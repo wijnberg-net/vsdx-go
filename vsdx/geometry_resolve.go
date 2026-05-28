@@ -26,6 +26,18 @@ type GeometryResolver struct {
 	precision  int     // decimal precision for output
 	geomIndex  int     // index of this geometry in shape (0=first)
 	totalGeoms int     // total number of geometries in shape
+
+	// inheritScaleX/Y bridge master geometry to the instance's coordinate
+	// frame when the shape has no local geometry section and inherits
+	// everything from its master. The master's geometry rows use absolute
+	// coordinates in the master's local space (e.g. a 2.17" template's
+	// LineTo lands at X=2.17); without scaling, that geometry is rendered
+	// at master size even when the instance is 0.16" wide. We multiply
+	// every absolute-coord row by these factors before localToSVG so the
+	// inherited path fits the instance. Equal to 1.0 in the common case
+	// (instance dimensions = master dimensions, or shape has local rows).
+	inheritScaleX float64
+	inheritScaleY float64
 }
 
 // ResolvedGeomResult contains the resolved geometry ready for SVG emission.
@@ -59,25 +71,52 @@ func ResolveGeometry(
 	precision int,
 	geomIndex, totalGeoms int,
 ) *ResolvedGeomResult {
+	return ResolveGeometryWithInherit(shape, geom, style,
+		localW, localH, offsetX, offsetY, scaleX, scaleY, parentH,
+		negativeH, precision, geomIndex, totalGeoms, 1.0, 1.0)
+}
+
+// ResolveGeometryWithInherit is the same as ResolveGeometry but takes
+// per-axis scale factors that get applied to absolute geometry coordinates.
+// The render tree builder uses this when a shape inherits its entire
+// geometry section from a master and the instance dimensions don't match
+// the master's, so the master's absolute coords (in master's local space)
+// have to be projected into the instance's local space.
+//
+// Callers that don't care about master-inheritance scaling should pass
+// inheritScaleX = inheritScaleY = 1.0 (or use ResolveGeometry).
+func ResolveGeometryWithInherit(
+	shape *Shape,
+	geom *Geometry,
+	style *EffectiveStyle,
+	localW, localH, offsetX, offsetY float64,
+	scaleX, scaleY, parentH float64,
+	negativeH bool,
+	precision int,
+	geomIndex, totalGeoms int,
+	inheritScaleX, inheritScaleY float64,
+) *ResolvedGeomResult {
 	if geom == nil || len(geom.Rows) == 0 {
 		return nil
 	}
 
 	resolver := &GeometryResolver{
-		shape:      shape,
-		geom:       geom,
-		style:      style,
-		localW:     localW,
-		localH:     localH,
-		offsetX:    offsetX,
-		offsetY:    offsetY,
-		scaleX:     scaleX,
-		scaleY:     scaleY,
-		parentH:    parentH,
-		negativeH:  negativeH,
-		precision:  precision,
-		geomIndex:  geomIndex,
-		totalGeoms: totalGeoms,
+		shape:         shape,
+		geom:          geom,
+		style:         style,
+		localW:        localW,
+		localH:        localH,
+		offsetX:       offsetX,
+		offsetY:       offsetY,
+		scaleX:        scaleX,
+		scaleY:        scaleY,
+		parentH:       parentH,
+		negativeH:     negativeH,
+		precision:     precision,
+		geomIndex:     geomIndex,
+		totalGeoms:    totalGeoms,
+		inheritScaleX: inheritScaleX,
+		inheritScaleY: inheritScaleY,
 	}
 
 	return resolver.resolve()
@@ -189,6 +228,35 @@ func (r *GeometryResolver) computeArrowSetbackInSVGUnits(setbackPts float64) flo
 	return (setbackPts / 72.0) * avgScale
 }
 
+// rowScaleX / rowScaleY return the appropriate scale factor for a row's
+// absolute coordinates. Rows whose XML lives in the master's geometry
+// section (inherited) get the master-to-instance scale; rows in the local
+// geometry section keep coords as-is.
+func (r *GeometryResolver) rowScaleX(row *GeometryRow) float64 {
+	if r.isInherited(row) {
+		return r.inheritScaleX
+	}
+	return 1.0
+}
+func (r *GeometryResolver) rowScaleY(row *GeometryRow) float64 {
+	if r.isInherited(row) {
+		return r.inheritScaleY
+	}
+	return 1.0
+}
+func (r *GeometryResolver) isInherited(row *GeometryRow) bool {
+	if row == nil || r.geom == nil || row.xml == nil || r.geom.xml == nil {
+		return false
+	}
+	return row.xml.Parent() != r.geom.xml
+}
+
+// absX / absY scale an absolute geometry coordinate to the instance's local
+// space, accounting for whether the row came from the master or the local
+// section. Identity when inheritScale is 1.0.
+func (r *GeometryResolver) absX(v float64) float64 { return v * r.inheritScaleX }
+func (r *GeometryResolver) absY(v float64) float64 { return v * r.inheritScaleY }
+
 // localToSVG transforms local Visio coordinates to SVG coordinates.
 func (r *GeometryResolver) localToSVG(visioX, visioY float64) (float64, float64) {
 	svgX := visioX * r.scaleX
@@ -215,14 +283,14 @@ func (r *GeometryResolver) buildPathData() string {
 		rt := strings.ToLower(row.RowType())
 		switch rt {
 		case "moveto":
-			sx, sy := row.X(), row.Y()
+			sx, sy := row.X()*r.rowScaleX(row), row.Y()*r.rowScaleY(row)
 			svgX, svgY := r.localToSVG(sx+r.offsetX, sy+r.offsetY)
 			d.WriteString(fmt.Sprintf("M%s %s", r.fmtNum(svgX), r.fmtNum(svgY)))
 			prevX, prevY = svgX, svgY
 			startX, startY = svgX, svgY
 
 		case "lineto":
-			sx, sy := row.X(), row.Y()
+			sx, sy := row.X()*r.rowScaleX(row), row.Y()*r.rowScaleY(row)
 			svgX, svgY := r.localToSVG(sx+r.offsetX, sy+r.offsetY)
 			d.WriteString(fmt.Sprintf("L%s %s", r.fmtNum(svgX), r.fmtNum(svgY)))
 			prevX, prevY = svgX, svgY
@@ -245,7 +313,7 @@ func (r *GeometryResolver) buildPathData() string {
 			prevX, prevY = svgX, svgY
 
 		case "arcto":
-			sx, sy := row.X(), row.Y()
+			sx, sy := row.X()*r.rowScaleX(row), row.Y()*r.rowScaleY(row)
 			svgX, svgY := r.localToSVG(sx+r.offsetX, sy+r.offsetY)
 			bow := r.cellFloat(row, "A")
 			arcSVG := r.arcToSVG(prevX, prevY, svgX, svgY, bow*((r.scaleX+r.scaleY)/2))
@@ -253,10 +321,12 @@ func (r *GeometryResolver) buildPathData() string {
 			prevX, prevY = svgX, svgY
 
 		case "ellipticalarcto":
-			ex, ey := row.X(), row.Y()
+			rsX := r.rowScaleX(row)
+			rsY := r.rowScaleY(row)
+			ex, ey := row.X()*rsX, row.Y()*rsY
 			svgEndX, svgEndY := r.localToSVG(ex+r.offsetX, ey+r.offsetY)
-			cpX := r.cellFloat(row, "A") + r.offsetX
-			cpY := r.cellFloat(row, "B") + r.offsetY
+			cpX := r.cellFloat(row, "A")*rsX + r.offsetX
+			cpY := r.cellFloat(row, "B")*rsY + r.offsetY
 			rotAngleDeg := r.cellFloat(row, "C")
 			aspectRatio := r.cellFloat(row, "D")
 
@@ -314,7 +384,7 @@ func (r *GeometryResolver) buildPathData() string {
 			prevX, prevY = svgX, svgY
 
 		case "nurbsto":
-			sx, sy := row.X(), row.Y()
+			sx, sy := row.X()*r.rowScaleX(row), row.Y()*r.rowScaleY(row)
 			svgX, svgY := r.localToSVG(sx+r.offsetX, sy+r.offsetY)
 			eFormula := r.cellString(row, "E")
 			nurbsInfo := parseNURBSData(eFormula)
@@ -330,7 +400,7 @@ func (r *GeometryResolver) buildPathData() string {
 			prevX, prevY = actualEndX, actualEndY
 
 		case "polylineto":
-			sx, sy := row.X(), row.Y()
+			sx, sy := row.X()*r.rowScaleX(row), row.Y()*r.rowScaleY(row)
 			svgX, svgY := r.localToSVG(sx+r.offsetX, sy+r.offsetY)
 			aFormula := r.cellString(row, "A")
 			pts := parsePolylinePoints(aFormula, r.localW, r.localH, r.offsetX, r.offsetY)

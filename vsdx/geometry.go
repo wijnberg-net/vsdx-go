@@ -105,16 +105,33 @@ func (g *Geometry) Move(xDelta, yDelta float64) {
 }
 
 // setRowCoords sets the X, Y coordinates of the nth row of the given type.
+//
+// Only LOCAL rows are considered (rows whose XML element lives inside this
+// geometry section). Rows inherited from a master share their XML element
+// with the master shape, and calling SetX/SetY on them would mutate the
+// master geometry — not what callers want. Equally important: iteration is
+// sorted by IX numerically so picking "index 0" is deterministic, instead
+// of depending on Go's randomised map iteration order.
 func (g *Geometry) setRowCoords(rowType string, x, y float64, index int) {
-	var matching []*GeometryRow
-	for _, r := range g.Rows {
-		if strings.ToLower(r.RowType()) == rowType {
-			matching = append(matching, r)
-		}
+	type indexed struct {
+		ix int
+		r  *GeometryRow
 	}
+	var matching []indexed
+	for ixStr, r := range g.Rows {
+		if strings.ToLower(r.RowType()) != rowType {
+			continue
+		}
+		if r.xml.Parent() != g.xml {
+			continue // inherited from master, skip
+		}
+		ix, _ := strconv.Atoi(ixStr)
+		matching = append(matching, indexed{ix, r})
+	}
+	sort.Slice(matching, func(i, j int) bool { return matching[i].ix < matching[j].ix })
 	if index < len(matching) {
-		matching[index].SetX(x)
-		matching[index].SetY(y)
+		matching[index].r.SetX(x)
+		matching[index].r.SetY(y)
 	}
 }
 
