@@ -354,6 +354,14 @@ func (s *Shape) SetWidth(v float64) {
 		if loc := s.LocX(); loc != 0 {
 			s.SetLocX(loc * scale)
 		}
+		// Sub-shapes draw inside the parent's local coordinate space; when
+		// the parent's Width grows, their absolute coordinates need to grow
+		// proportionally too. Without this, a Visio "Can" instance resized
+		// to 2x its master width still renders its cylinder body at master
+		// width because the body lives on a child shape.
+		for _, child := range s.ChildShapes() {
+			scaleChildShapeAxis(child, "X", scale)
+		}
 	}
 }
 
@@ -370,8 +378,60 @@ func (s *Shape) SetHeight(v float64) {
 			if loc := s.LocY(); loc != 0 {
 				s.SetLocY(loc * ratio)
 			}
+			for _, child := range s.ChildShapes() {
+				scaleChildShapeAxis(child, "Y", ratio)
+			}
 		}
 	}
+}
+
+// scaleChildShapeAxis multiplies a sub-shape's axis-related cells by scale,
+// recursing into the sub-shape's own children. We touch:
+//   - PinX (or PinY) — the child's position inside the parent's coord space
+//   - Width (or Height) — the child's own size
+//   - LocPinX (or LocPinY) — the child's pin offset (so it scales with width)
+//   - geometry rows that store absolute coords in this axis
+//
+// We don't touch cells whose F attribute references "Width" / "Height"
+// because they're driven by the parent's Width/Height already.
+func scaleChildShapeAxis(s *Shape, axis string, scale float64) {
+	if s == nil || scale == 1.0 {
+		return
+	}
+	var pin, locPin, dim CellName
+	if axis == "X" {
+		pin, locPin, dim = CellPinX, CellLocPinX, CellWidth
+	} else {
+		pin, locPin, dim = CellPinY, CellLocPinY, CellHeight
+	}
+	scaleNonInhCell(s, pin, scale)
+	scaleNonInhCell(s, dim, scale)
+	scaleNonInhCell(s, locPin, scale)
+	scaleGeometryAxis(s.Geometry, axis, scale)
+	for _, child := range s.ChildShapes() {
+		scaleChildShapeAxis(child, axis, scale)
+	}
+}
+
+// scaleNonInhCell scales a cell's Value, including F="Inh" cells. We have
+// to scale even Inh cells because the renderer reads Value, and Value for
+// child shapes is captured at authoring time (when instance dims == master
+// dims). After a parent resize, the inherited Value is stale. The formula
+// stays untouched so Visio's own re-evaluation on reload is still correct.
+//
+// Cells whose formula references Width / Height of the SAME shape are
+// already driven by that shape's resized cell, so we skip them to avoid
+// double-scaling.
+func scaleNonInhCell(s *Shape, name CellName, scale float64) {
+	cell := s.Cells[string(name)]
+	if cell == nil {
+		return
+	}
+	f := cell.Formula()
+	if strings.Contains(f, "Width") || strings.Contains(f, "Height") {
+		return
+	}
+	cell.SetValue(fmtFloat(toFloat(cell.Value()) * scale))
 }
 
 func absVal(v float64) float64 {

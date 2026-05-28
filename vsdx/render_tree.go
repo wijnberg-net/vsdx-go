@@ -283,21 +283,33 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 
 	geoms := shape.Geometries
 	// inheritScaleX/Y bridges master-local geometry coords into the instance's
-	// frame. The resolver applies this PER ROW: only rows whose XML lives in
-	// the master's section (i.e. inherited references) get scaled; rows in
-	// the local section keep their coords as-is. So we compute the scale
-	// whenever a master exists, even when the shape has a partial local
-	// section that inherits some rows.
+	// frame. We use the TOP-LEVEL shape's instance/master ratio for every
+	// descendant — Visio sub-shapes draw in the top-level instance's
+	// coordinate space, but their individual Width/Height cells inherit
+	// the master's values (so the per-shape ratio is always 1 for inherited
+	// children and they'd never scale otherwise).
+	//
+	// Note: shape.Geometries can be a slice of the MASTER's Geometry pointers
+	// (newShape sets `s.Geometries = ms.Geometries` when the instance has no
+	// local Geometry section). In that case len(geoms) is non-zero but the
+	// rows still belong to the master and need per-row scaling.
 	inheritScaleX, inheritScaleY := 1.0, 1.0
+	allInherited := false
 	masterShape := shape.MasterShape()
+	if masterShape != nil && len(geoms) > 0 {
+		if g := geoms[0]; g != nil && g.xml != nil && g.xml.Parent() != shape.xml {
+			allInherited = true
+		}
+	}
 	if len(geoms) == 0 && masterShape != nil {
 		geoms = masterShape.Geometries
+		allInherited = true
 	}
-	if masterShape != nil {
-		masterW := math.Abs(masterShape.Width())
-		masterH := math.Abs(masterShape.Height())
-		instW := math.Abs(shape.Width())
-		instH := math.Abs(shape.Height())
+	if rootMaster := b.root.MasterShape(); rootMaster != nil {
+		masterW := math.Abs(rootMaster.Width())
+		masterH := math.Abs(rootMaster.Height())
+		instW := math.Abs(b.root.Width())
+		instH := math.Abs(b.root.Height())
 		if masterW > 0 && instW > 0 {
 			inheritScaleX = instW / masterW
 		}
@@ -331,7 +343,7 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 		// The legacy renderer uses the top-level shape's height for ALL shapes,
 		// regardless of nesting. This ensures correct Y-flip when offsetY
 		// accumulates across multiple hierarchy levels.
-		result := ResolveGeometryWithInherit(
+		result := ResolveGeometryWithInheritAll(
 			shape,
 			geom,
 			style,
@@ -343,6 +355,7 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 			b.precision,
 			geomIndex, totalGeoms,
 			inheritScaleX, inheritScaleY,
+			allInherited,
 		)
 		geomIndex++
 

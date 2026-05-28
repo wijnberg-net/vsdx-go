@@ -38,6 +38,11 @@ type GeometryResolver struct {
 	// (instance dimensions = master dimensions, or shape has local rows).
 	inheritScaleX float64
 	inheritScaleY float64
+	// allInherited is set when the entire geometry section passed to the
+	// resolver is the master's (no local override). In that case every row
+	// is implicitly inherited even though row.xml.Parent() equals geom.xml
+	// (because geom IS the master's section).
+	allInherited bool
 }
 
 // ResolvedGeomResult contains the resolved geometry ready for SVG emission.
@@ -96,6 +101,30 @@ func ResolveGeometryWithInherit(
 	geomIndex, totalGeoms int,
 	inheritScaleX, inheritScaleY float64,
 ) *ResolvedGeomResult {
+	return ResolveGeometryWithInheritAll(shape, geom, style,
+		localW, localH, offsetX, offsetY, scaleX, scaleY, parentH,
+		negativeH, precision, geomIndex, totalGeoms,
+		inheritScaleX, inheritScaleY, false)
+}
+
+// ResolveGeometryWithInheritAll extends ResolveGeometryWithInherit with an
+// "allInherited" flag for callers that hand us a geometry section that
+// physically belongs to the master shape (so every row should be scaled by
+// inheritScale, not just rows whose xml.Parent() differs from geom.xml —
+// which would otherwise return false here because the geom IS the master's
+// section).
+func ResolveGeometryWithInheritAll(
+	shape *Shape,
+	geom *Geometry,
+	style *EffectiveStyle,
+	localW, localH, offsetX, offsetY float64,
+	scaleX, scaleY, parentH float64,
+	negativeH bool,
+	precision int,
+	geomIndex, totalGeoms int,
+	inheritScaleX, inheritScaleY float64,
+	allInherited bool,
+) *ResolvedGeomResult {
 	if geom == nil || len(geom.Rows) == 0 {
 		return nil
 	}
@@ -117,6 +146,7 @@ func ResolveGeometryWithInherit(
 		totalGeoms:    totalGeoms,
 		inheritScaleX: inheritScaleX,
 		inheritScaleY: inheritScaleY,
+		allInherited:  allInherited,
 	}
 
 	return resolver.resolve()
@@ -245,6 +275,9 @@ func (r *GeometryResolver) rowScaleY(row *GeometryRow) float64 {
 	return 1.0
 }
 func (r *GeometryResolver) isInherited(row *GeometryRow) bool {
+	if r.allInherited {
+		return true
+	}
 	if row == nil || r.geom == nil || row.xml == nil || r.geom.xml == nil {
 		return false
 	}
@@ -414,10 +447,12 @@ func (r *GeometryResolver) buildPathData() string {
 
 		case "infiniteline":
 			// InfiniteLine: two points defining an infinite line; render as line segment
-			sx := r.cellFloat(row, "X") + r.offsetX
-			sy := r.cellFloat(row, "Y") + r.offsetY
-			ax := r.cellFloat(row, "A") + r.offsetX
-			ay := r.cellFloat(row, "B") + r.offsetY
+			rsX := r.rowScaleX(row)
+			rsY := r.rowScaleY(row)
+			sx := r.cellFloat(row, "X")*rsX + r.offsetX
+			sy := r.cellFloat(row, "Y")*rsY + r.offsetY
+			ax := r.cellFloat(row, "A")*rsX + r.offsetX
+			ay := r.cellFloat(row, "B")*rsY + r.offsetY
 			svgX1, svgY1 := r.localToSVG(sx, sy)
 			svgX2, svgY2 := r.localToSVG(ax, ay)
 			d.WriteString(fmt.Sprintf("M%s %s L%s %s",
@@ -426,13 +461,17 @@ func (r *GeometryResolver) buildPathData() string {
 			prevX, prevY = svgX2, svgY2
 
 		case "ellipse":
-			cx := r.cellFloat(row, "X") + r.offsetX
-			cy := r.cellFloat(row, "Y") + r.offsetY
+			// Ellipse cells are all absolute coordinates in the shape's local
+			// frame, so they all pick up the per-row inheritance scale.
+			rsX := r.rowScaleX(row)
+			rsY := r.rowScaleY(row)
+			cx := r.cellFloat(row, "X")*rsX + r.offsetX
+			cy := r.cellFloat(row, "Y")*rsY + r.offsetY
 			svgCx, svgCy := r.localToSVG(cx, cy)
-			ax := r.cellFloat(row, "A")
-			ay := r.cellFloat(row, "B")
-			cx2 := r.cellFloat(row, "C")
-			cy2 := r.cellFloat(row, "D")
+			ax := r.cellFloat(row, "A") * rsX
+			ay := r.cellFloat(row, "B") * rsY
+			cx2 := r.cellFloat(row, "C") * rsX
+			cy2 := r.cellFloat(row, "D") * rsY
 			rx := math.Sqrt(math.Pow(ax-cx+r.offsetX, 2)+math.Pow(ay-cy+r.offsetY, 2)) * ((r.scaleX + r.scaleY) / 2)
 			ry := math.Sqrt(math.Pow(cx2-cx+r.offsetX, 2)+math.Pow(cy2-cy+r.offsetY, 2)) * ((r.scaleX + r.scaleY) / 2)
 			if rx < 0.001 {
