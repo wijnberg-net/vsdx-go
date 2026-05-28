@@ -88,6 +88,8 @@ func TestComputeEffectiveStyle_HasShadow(t *testing.T) {
 func TestComputeArrowSetback(t *testing.T) {
 	// Affine fit to Visio's empirical setback values:
 	//   visualWidth = lengthMult * sizeMult * (5.17 + 1.85 * sw)
+	// LengthMult is now Visio's natural W/H aspect ratio per type (lend1=0.5, lend4=1.0, lend13=1.5).
+	// Size multipliers normalized to size 2 = 1.0 with Visio's per-step scale increment.
 	tests := []struct {
 		arrowType  int
 		arrowSize  int
@@ -95,12 +97,13 @@ func TestComputeArrowSetback(t *testing.T) {
 		want       float64
 	}{
 		{0, 2, 1.0, 0},      // No arrow: zero setback
-		{1, 2, 1.0, 7.02},   // Type 1 (lengthMult=1), size 2 (mult=1): 1*1*(5.17+1.85)=7.02
-		{4, 2, 3.0, 10.72},  // Type 4, size 2, sw=3: 1*1*(5.17+5.55)=10.72 (Visio observed 10.68)
-		{1, 0, 1.0, 3.51},   // Size 0 (mult=0.5): 0.5*(5.17+1.85)=3.51
-		{1, 6, 1.0, 17.55},  // Size 6 (mult=2.5): 2.5*(5.17+1.85)=17.55
-		{13, 2, 1.0, 10.53}, // Type 13 (lengthMult=1.5), size 2: 1.5*(5.17+1.85)=10.53
-		{13, 2, 3.0, 16.08}, // Type 13, size 2, sw=3: 1.5*(5.17+5.55)=16.08 (Visio observed 16.20)
+		{1, 2, 1.0, 0},      // Type 1 (open chevron, Setback=0): line passes through
+		{4, 2, 3.0, 10.72},  // Type 4 (closed triangle, Setback=2), size 2, sw=3: 2*1*(5.17+5.55)/2=10.72
+		{11, 2, 1.0, 2.63},  // Type 11 (filled square, centered, Setback=0.75): 0.75*1*7.02/2=2.63
+		{2, 2, 1.0, 3.51},   // Type 2 (filled triangle, Setback=1): 1*1*7.02/2=3.51
+		{13, 2, 1.0, 10.53}, // Type 13 (filled triangle long, Setback=3): 3*1*7.02/2=10.53
+		{13, 2, 3.0, 16.08}, // Type 13, size 2, sw=3: 3*1*10.72/2=16.08
+		{22, 2, 1.0, 15.80}, // Type 22 (long diamond, Setback=4.5): 4.5*1*7.02/2=15.80
 	}
 
 	for _, tt := range tests {

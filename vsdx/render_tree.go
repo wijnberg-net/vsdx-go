@@ -93,6 +93,10 @@ type ResolvedText struct {
 	LineHeight     float64
 	SmallCaps      bool    // render as small capitals
 	TextPos        int     // 0=normal, 1=superscript, 2=subscript
+	// BackgroundFill is the fill colour for an opaque rectangle drawn behind
+	// the text (matches Visio's textBkgnd rect for connector labels so the
+	// line doesn't cut through the text). Empty = no background.
+	BackgroundFill string
 }
 
 // RenderTreeBuilder builds a render tree from a shape hierarchy.
@@ -429,35 +433,23 @@ func (b *RenderTreeBuilder) createMarkerDef(arrowType, arrowSize int, color stri
 		sizeMult = arrowSizeMultipliers[arrowSize]
 	}
 
-	// Apply arrow length multiplier (e.g., type 13 is 1.5x longer than type 4)
-	lengthMult := def.LengthMult
-	if lengthMult == 0 {
-		lengthMult = 1.0
-	}
-
-	// Use the same affine fit as computeArrowSetback so the marker's visible
-	// width equals the setback - this is what Visio does (the arrow tip lands
-	// exactly at the connector's logical endpoint).
-	//
-	//   visualWidth_abs = lengthMult * sizeMult * (5.17 + 1.85 * sw)
-	//
-	// To get markerWidth in stroke-width units we divide by sw. With markerUnits
-	// = "strokeWidth" the rendered marker then occupies visualWidth_abs path
-	// units (since markerWidth × sw = visualWidth_abs).
-	visualWidthAbs := lengthMult * sizeMult * (5.17 + 1.85*strokeWidth)
-	var markerWidthSU float64
+	// Visio's setback fit (size 2): visualWidth = W × sizeMult × (5.17 + 1.85 sw) / 2
+	// where W is Visio's natural lend width and "÷ 2" normalises against lend4
+	// (W=2, the reference). The marker is rendered at:
+	//   markerWidth  = W × naturalUnit (in stroke-width units)
+	//   markerHeight = H × naturalUnit
+	// so each arrow keeps Visio's natural per-type aspect (lend1 = 1:2 tall,
+	// lend22 = 2:1 long diamond, lend10 = 1:1 circle, etc.).
+	visualWidthAbs := def.W * sizeMult * (5.17 + 1.85*strokeWidth) / 2.0
+	var naturalUnit float64 // size of "1 lend unit" in stroke-width units
 	if strokeWidth > 0 {
-		markerWidthSU = visualWidthAbs / strokeWidth
+		naturalUnit = sizeMult * (5.17 + 1.85*strokeWidth) / (2.0 * strokeWidth)
 	} else {
-		markerWidthSU = 7.0 * sizeMult * lengthMult
+		naturalUnit = 7.0 * sizeMult / 2.0
 	}
-
-	// markerHeight is the marker's extent PERPENDICULAR to the line. The
-	// lengthMult elongates the marker ALONG the line (longer arrow) but does
-	// NOT widen it. So height = width / lengthMult to preserve Visio's actual
-	// rendered aspect ratio for elongated arrows (type 13/14 are 1.5x longer
-	// than wide; without this division they'd render as a too-tall triangle).
-	markerHeightSU := markerWidthSU / lengthMult
+	_ = visualWidthAbs // referenced for documentation; setback formula uses same math
+	markerWidthSU := def.W * naturalUnit
+	markerHeightSU := def.H * naturalUnit
 
 	pos := "start"
 	if isEnd {
@@ -509,6 +501,13 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		Baseline:   "alphabetic",
 	}
 
+	// For 1D connector shapes (have explicit Begin/End endpoints) Visio draws
+	// a white rectangle behind the text so the connector line doesn't bisect
+	// it. Detect a connector by the presence of BeginX/EndX cells.
+	if shape.CellValue("BeginX") != "" || shape.CellValue("EndX") != "" {
+		text.BackgroundFill = "#FFFFFF"
+	}
+
 	if style.Bold {
 		text.FontWeight = "bold"
 	}
@@ -545,13 +544,19 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 		shapeH = 1
 	}
 
-	// Get text block position - defaults to center of shape
-	txtPinX := toFloat(shape.CellValue("TxtPinX"))
-	txtPinY := toFloat(shape.CellValue("TxtPinY"))
-	if txtPinX == 0 {
+	// Get text block position - defaults to center of shape.
+	// TxtPinX/Y is in shape-local coords (relative to shape's lower-left bbox corner)
+	// and may fall outside the bbox (e.g. for connector labels positioned along a curve).
+	txtPinXCell := shape.CellValue("TxtPinX")
+	txtPinYCell := shape.CellValue("TxtPinY")
+	txtPinX := toFloat(txtPinXCell)
+	txtPinY := toFloat(txtPinYCell)
+	txtPinXSet := txtPinXCell != ""
+	txtPinYSet := txtPinYCell != ""
+	if !txtPinXSet {
 		txtPinX = shapeW / 2
 	}
-	if txtPinY == 0 {
+	if !txtPinYSet {
 		txtPinY = shapeH / 2
 	}
 
@@ -597,31 +602,44 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 	// Text should be positioned at Y=0 (bottom in Visio coords, line position)
 	zeroHeight := math.Abs(shape.Height()) < 0.001
 
-	switch vertAlign {
-	case 0: // Top
-		textY = shapeH - topMargin
-	case 2: // Bottom
-		textY = bottomMargin
-	default: // Middle
-		if zeroHeight {
-			// For zero-height shapes, position at geometry line (Y=0)
-			textY = 0
-		} else {
-			textY = shapeH / 2
+	if txtPinYSet {
+		textY = txtPinY
+	} else {
+		switch vertAlign {
+		case 0: // Top
+			textY = shapeH - topMargin
+		case 2: // Bottom
+			textY = bottomMargin
+		default: // Middle
+			if zeroHeight {
+				// For zero-height shapes, position at geometry line (Y=0)
+				textY = 0
+			} else {
+				textY = shapeH / 2
+			}
 		}
 	}
 
-	// SVG text-anchor based on horizontal alignment
+	// SVG text-anchor based on horizontal alignment.
+	// If TxtPinX is explicitly set, use it as the text block reference position
+	// (text-anchor then aligns the text relative to that point). Otherwise fall
+	// back to shape-bbox-based positioning.
 	switch horzAlign {
 	case 0: // Left
 		text.TextAnchor = "start"
-		textX = leftMargin
+		if !txtPinXSet {
+			textX = leftMargin
+		}
 	case 2: // Right
 		text.TextAnchor = "end"
-		textX = shapeW - rightMargin
+		if !txtPinXSet {
+			textX = shapeW - rightMargin
+		}
 	default: // Center
 		text.TextAnchor = "middle"
-		textX = shapeW / 2
+		if !txtPinXSet {
+			textX = shapeW / 2
+		}
 	}
 
 	// Calculate available width for text wrapping

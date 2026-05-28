@@ -3,6 +3,7 @@ package vsdx
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -236,6 +237,72 @@ func (e *SVGEmitter) findMaxStrokeWidthRecursive(node *RenderNode, max *float64)
 	}
 }
 
+// isVerticalBarOnly returns true if every L command in the path moves only in Y
+// from its preceding M (i.e. the path is one or more vertical line segments).
+// Used to pick the right stroke-width compensation for bar arrows (24-26).
+func isVerticalBarOnly(path string) bool {
+	// Tokenize commands + numbers
+	hasL := false
+	tokens := []string{}
+	cur := ""
+	for _, c := range path {
+		if c == ' ' || c == ',' {
+			if cur != "" {
+				tokens = append(tokens, cur)
+				cur = ""
+			}
+		} else if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			if cur != "" {
+				tokens = append(tokens, cur)
+				cur = ""
+			}
+			tokens = append(tokens, string(c))
+		} else {
+			cur += string(c)
+		}
+	}
+	if cur != "" {
+		tokens = append(tokens, cur)
+	}
+	// Walk: track current point. For each L, check X matches previous point's X.
+	var lastX string
+	cmd := ""
+	idx := 0
+	for idx < len(tokens) {
+		t := tokens[idx]
+		if t == "M" || t == "L" || t == "C" || t == "Z" || t == "z" {
+			cmd = t
+			idx++
+			continue
+		}
+		if cmd == "C" {
+			// Bezier: not a bar
+			return false
+		}
+		if cmd == "M" {
+			if idx+1 >= len(tokens) {
+				return false
+			}
+			lastX = tokens[idx]
+			idx += 2
+			continue
+		}
+		if cmd == "L" {
+			if idx+1 >= len(tokens) {
+				return false
+			}
+			if tokens[idx] != lastX {
+				return false // not vertical
+			}
+			hasL = true
+			idx += 2
+			continue
+		}
+		idx++
+	}
+	return hasL
+}
+
 func (e *SVGEmitter) emitMarker(m *MarkerDef) string {
 	if m == nil || m.Path == "" {
 		return ""
@@ -248,23 +315,192 @@ func (e *SVGEmitter) emitMarker(m *MarkerDef) string {
 		strokeAttr = "none"
 	}
 
+	// Pick orient and path-mirror flag based on arrow type and begin/end role.
+	//
+	// Path-layout convention (from generator script):
+	//   - A-type (RefX=0): apex at viewBox right (10), body at left (0).
+	//     These arrows have apex at lend origin = at line attachment.
+	//   - B-type (RefX=10): body/back-elements at viewBox left (0),
+	//     apex/far-elements at viewBox right (10). These arrows have lend
+	//     origin = body of arrow, with apex/elements extending in lend +X.
+	//
+	// Visio places the arrow so that:
+	//   - BEGIN: body at line start, apex/elements forward into line area
+	//   - END: body at line end, apex/elements backward into line area
+	//
+	// For A-type:
+	//   BEGIN: use auto-start-reverse so the (viewBox-right) apex lands AT
+	//          line start and (viewBox-left) body opens forward into line.
+	//   END: use auto. Apex extends forward past line end (the setback then
+	//        pulls line back so apex visually sits at original endpoint).
+	//
+	// For B-type:
+	//   BEGIN: use auto with refX=0 OR equivalent — body at line start, apex
+	//          forward. With our path (body at viewBox 0, apex at viewBox 10)
+	//          and refX=10, we need to mirror the path so body is at viewBox 10
+	//          and use auto-start-reverse to flip the orient. OR keep path
+	//          and use refX=0 + auto.
+	//   END: body at line end, apex backward. Mirror path (body at viewBox 10,
+	//        apex at viewBox 0) and use auto with refX=10.
+	//
+	// We choose to mirror the path for B-type END markers (keeping a single
+	// canonical path per type), with refX always at the body position.
 	orient := "auto"
+	pathStr := m.Path
+	isBackAnchored := m.RefX >= 9.5 // RefX=10 indicates back-anchored
 	if !m.IsEnd {
-		orient = "auto-start-reverse"
+		if !isBackAnchored {
+			// A-type begin: flip via auto-start-reverse so apex lands at line start
+			orient = "auto-start-reverse"
+		} else {
+			// B-type begin: keep auto; path layout already puts body at viewBox left,
+			// apex/elements at viewBox right. Need refX=0 for body at line start.
+			// We override refX here for begin variant.
+		}
+	} else if isBackAnchored {
+		// B-type end: mirror path so body ends up at viewBox 10 (= refX) and
+		// apex/elements at viewBox 0 (= back into line area after auto orient).
+		pathStr = mirrorPathX(m.Path)
+	}
+	// Adjust refX for B-type begin
+	refX := m.RefX
+	if !m.IsEnd && isBackAnchored {
+		refX = 0
 	}
 
 	// preserveAspectRatio="none" lets the 10x10 path stretch to match
-	// markerWidth/markerHeight independently. Without it, the default
-	// "xMidYMid meet" forces uniform scaling, which squashes elongated
-	// arrows (e.g. type 13 with markerWidth=5.4, markerHeight=3.6) back
-	// into a square-aspect triangle - making "long" arrows look stubby.
-	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" markerUnits="strokeWidth" orient="%s" preserveAspectRatio="none"><path d="%s" fill="%s" stroke="%s"/></marker>`,
+	// markerWidth/markerHeight independently — without it, "xMidYMid meet"
+	// forces uniform scaling and squashes elongated arrows back into a
+	// square aspect.
+	//
+	// overflow="visible" lets bezier-based arrows (5,6,17,18,19) render
+	// their slight overhang outside viewBox.
+	//
+	// Stroke-width compensates for viewBox-to-marker stretching so the rendered
+	// outline thickness is 1 strokeWidth unit (= line thickness, like Visio).
+	// Strategy depends on stroke direction in the path:
+	//   - Vertical-only strokes (bar arrows 24/25/26): rendered width =
+	//     stroke-width × horizontal_scale, so set stroke-width = 10/markerWidth
+	//   - Otherwise (mixed/diagonal strokes): use average of horiz+vert scales,
+	//     which works well for triangles, diamonds, circles
+	horizScale := m.Width / 10.0
+	vertScale := m.Height / 10.0
+	avgScale := (horizScale + vertScale) / 2.0
+	strokeW := 1.0
+	if avgScale > 0 {
+		strokeW = 1.0 / avgScale
+	}
+	// Detect vertical-bar-only paths: contains "M X _ L X _" patterns with
+	// matching X values (no horizontal or diagonal strokes).
+	if isVerticalBarOnly(pathStr) && horizScale > 0 {
+		strokeW = 1.0 / horizScale
+	}
+	return fmt.Sprintf(`    <marker id="%s" viewBox="0 0 %s %s" refX="%s" refY="%s" markerWidth="%s" markerHeight="%s" markerUnits="strokeWidth" orient="%s" overflow="visible" preserveAspectRatio="none"><path d="%s" fill="%s" stroke="%s" stroke-width="%s" stroke-linecap="round" stroke-linejoin="round"/></marker>`,
 		m.ID,
-		e.fmtNum(10), e.fmtNum(10), // viewBox dimensions (standard arrow size)
-		e.fmtNum(m.RefX), e.fmtNum(m.RefY),
+		e.fmtNum(10), e.fmtNum(10),
+		e.fmtNum(refX), e.fmtNum(m.RefY),
 		e.fmtNum(m.Width), e.fmtNum(m.Height),
 		orient,
-		m.Path, fillAttr, strokeAttr)
+		pathStr, fillAttr, strokeAttr, e.fmtNum(strokeW))
+}
+
+// mirrorPathX flips a path's X coordinates around viewBox center 5 (10-x).
+// Used to convert back-anchored arrow paths between BEGIN and END layouts.
+func mirrorPathX(path string) string {
+	var b strings.Builder
+	tokens := []string{}
+	cur := ""
+	for _, c := range path {
+		if c == ' ' || c == ',' {
+			if cur != "" {
+				tokens = append(tokens, cur)
+				cur = ""
+			}
+		} else if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			if cur != "" {
+				tokens = append(tokens, cur)
+				cur = ""
+			}
+			tokens = append(tokens, string(c))
+		} else {
+			cur += string(c)
+		}
+	}
+	if cur != "" {
+		tokens = append(tokens, cur)
+	}
+	// Walk tokens, flip X on M/L/C coordinate pairs.
+	cmd := ""
+	idx := 0
+	first := true
+	for idx < len(tokens) {
+		t := tokens[idx]
+		if isAlpha(t) {
+			cmd = t
+			if !first {
+				b.WriteByte(' ')
+			}
+			b.WriteString(t)
+			first = false
+			idx++
+			continue
+		}
+		switch cmd {
+		case "M", "L":
+			if idx+1 >= len(tokens) {
+				break
+			}
+			x, _ := strconv.ParseFloat(tokens[idx], 64)
+			b.WriteByte(' ')
+			b.WriteString(fmtMirrorCoord(10 - x))
+			b.WriteByte(' ')
+			b.WriteString(tokens[idx+1])
+			idx += 2
+		case "C":
+			// Three X,Y pairs: control1, control2, end
+			for k := 0; k < 3; k++ {
+				if idx+1 >= len(tokens) {
+					break
+				}
+				x, _ := strconv.ParseFloat(tokens[idx], 64)
+				b.WriteByte(' ')
+				b.WriteString(fmtMirrorCoord(10 - x))
+				b.WriteByte(' ')
+				b.WriteString(tokens[idx+1])
+				idx += 2
+			}
+		default:
+			if !first {
+				b.WriteByte(' ')
+			}
+			b.WriteString(t)
+			idx++
+		}
+	}
+	return b.String()
+}
+
+func isAlpha(s string) bool {
+	if len(s) != 1 {
+		return false
+	}
+	c := s[0]
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+func fmtMirrorCoord(v float64) string {
+	s := fmt.Sprintf("%.3f", v)
+	// trim trailing zeros and trailing dot
+	for len(s) > 0 && s[len(s)-1] == '0' {
+		s = s[:len(s)-1]
+	}
+	if len(s) > 0 && s[len(s)-1] == '.' {
+		s = s[:len(s)-1]
+	}
+	if s == "-0" || s == "" {
+		s = "0"
+	}
+	return s
 }
 
 func (e *SVGEmitter) emitGeometry(svg *strings.Builder, node *RenderNode) {
@@ -463,6 +699,45 @@ func (e *SVGEmitter) emitText(svg *strings.Builder, node *RenderNode) {
 	if node.Text != nil && node.Text.Content != "" {
 		t := node.Text
 		content := escapeXML(t.Content)
+
+		// Visio draws a white rect behind text on connectors so the line
+		// doesn't bisect it. Estimate text bounds from font size and content.
+		if t.BackgroundFill != "" {
+			// Approximate text width: avg glyph ~0.5em (Calibri-like).
+			lines := t.Lines
+			if len(lines) == 0 {
+				lines = []string{t.Content}
+			}
+			maxLen := 0
+			for _, line := range lines {
+				if n := len([]rune(line)); n > maxLen {
+					maxLen = n
+				}
+			}
+			widthEst := float64(maxLen) * t.FontSize * 0.5
+			lineCount := len(lines)
+			if lineCount == 0 {
+				lineCount = 1
+			}
+			heightEst := t.FontSize * 0.8 * float64(lineCount)
+			// position rect based on text-anchor
+			var rectX float64
+			switch t.TextAnchor {
+			case "end":
+				rectX = t.X - widthEst
+			case "middle":
+				rectX = t.X - widthEst/2
+			default:
+				rectX = t.X
+			}
+			// alphabetic baseline sits ~0.8em below top of glyph box
+			rectY := t.Y - t.FontSize*0.75
+			svg.WriteString(fmt.Sprintf(`  <rect x="%s" y="%s" width="%s" height="%s" fill="%s" stroke="none"/>`,
+				e.fmtNum(rectX), e.fmtNum(rectY),
+				e.fmtNum(widthEst), e.fmtNum(heightEst),
+				t.BackgroundFill))
+			svg.WriteByte('\n')
+		}
 
 		svg.WriteString(fmt.Sprintf(`  <text x="%s" y="%s" text-anchor="%s" dominant-baseline="%s" fill="%s" font-size="%s" font-weight="%s" font-style="%s"`,
 			e.fmtNum(t.X), e.fmtNum(t.Y),

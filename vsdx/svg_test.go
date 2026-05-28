@@ -612,18 +612,20 @@ func TestParsePolylinePoints(t *testing.T) {
 }
 
 func TestLinePatternToSVG(t *testing.T) {
+	// Dash/gap sizes match Visio's SVG exports: 7w dash, 5w gap, 0-length dots
+	// (rendered as round caps), 3w sparse-dot gap.
 	tests := []struct {
 		pattern int
 		weight  float64
 		want    string
 	}{
-		{0, 1, ""},         // None
-		{1, 1, ""},         // Solid
-		{2, 1, "4.00 2.00"}, // Dash
-		{3, 1, "1.00 2.00"}, // Dot
-		{4, 1, "4.00 2.00 1.00 2.00"}, // Dash-Dot
-		{10, 1, "1.00 4.00"}, // Sparse Dot
-		{11, 1, "1.00 1.00"}, // Dense Dot
+		{0, 1, ""},                    // None
+		{1, 1, ""},                    // Solid
+		{2, 1, "7.00 5.00"},           // Dash
+		{3, 1, "0 5.00"},              // Dot (round caps + zero-length dash)
+		{4, 1, "7.00 5.00 0 5.00"},    // Dash-Dot
+		{10, 1, "0 3.00"},             // Sparse Dot
+		{11, 1, "0 2.00"},             // Dense Dot
 	}
 
 	for _, tt := range tests {

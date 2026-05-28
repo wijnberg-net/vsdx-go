@@ -847,18 +847,22 @@ func computeArrowSetback(arrowType, arrowSize int, lineWeight float64) float64 {
 		return 0
 	}
 
-	sizeMultipliers := []float64{0.5, 0.7, 1.0, 1.3, 1.6, 2.0, 2.5}
+	sizeMultipliers := arrowSizeMultipliers
 	sizeIdx := arrowSize
 	if sizeIdx < 0 || sizeIdx >= len(sizeMultipliers) {
 		sizeIdx = 2 // default medium
 	}
 	sizeMult := sizeMultipliers[sizeIdx]
 
-	lengthMult := ArrowLengthMult(arrowType)
+	def, ok := visioArrowTypes[arrowType]
+	if !ok {
+		def = visioArrowTypes[1]
+	}
 
-	// Affine fit: marker visible width grows roughly 5.17 sw-units base + 1.85
-	// abs units per stroke-width increment.
-	visualWidth := lengthMult * sizeMult * (5.17 + 1.85*lineWeight)
+	// Setback is per-type (open chevrons → 0, closed shapes → W, centered
+	// symbols → W/2). Affine fit normalised against lend4 (Setback=2): a W=2
+	// arrow at size 2, sw=1 gets setback 7.02 (matches Visio observation 7.04).
+	visualWidth := def.Setback * sizeMult * (5.17 + 1.85*lineWeight) / 2.0
 	return visualWidth
 }
 
