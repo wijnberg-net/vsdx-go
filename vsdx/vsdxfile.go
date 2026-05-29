@@ -432,6 +432,32 @@ func (v *VisioFile) RemovePageByIndex(index int) {
 	// Remove from app.xml
 	v.removePageFromAppXML(page.Name())
 
+	// Remove the page's <Override> entry from [Content_Types].xml so the
+	// package descriptor no longer advertises a part that doesn't exist.
+	// Without this, Visio's content-type table accumulates phantom entries
+	// for every removed page.
+	pagePartName := "/" + page.filename
+	if v.contentTypesXML != nil && v.contentTypesXML.Root() != nil {
+		for _, ov := range v.contentTypesXML.Root().SelectElements("Override") {
+			if ov.SelectAttrValue("PartName", "") == pagePartName {
+				v.contentTypesXML.Root().RemoveChild(ov)
+				break
+			}
+		}
+	}
+
+	// Remove the page's <Relationship> entry from pages.xml.rels so the
+	// rels table mirrors the actual files in the package.
+	relTarget := strings.TrimPrefix(page.filename, "visio/pages/")
+	if v.pagesXMLRels != nil && v.pagesXMLRels.Root() != nil {
+		for _, rel := range v.pagesXMLRels.Root().SelectElements("Relationship") {
+			if rel.SelectAttrValue("Target", "") == relTarget {
+				v.pagesXMLRels.Root().RemoveChild(rel)
+				break
+			}
+		}
+	}
+
 	// Remove page XML from zip contents
 	delete(v.ZipFileContents, page.filename)
 
@@ -1308,6 +1334,34 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 	// automatically; before this hook ran our document.xml shipped a static
 	// 25-entry palette regardless of which colors the shapes used.
 	v.refreshDocumentColorPalette()
+	v.refreshFaceNames()
+	v.refreshAppXMLHLinks()
+
+	// Every shape carrying Character/Paragraph sections gets a leading
+	// <cp IX="0"/> / <pp IX="0"/> marker on its <Text> element. Matches
+	// Visio's canonical output where the initial run binds explicitly
+	// to row 0 of the formatting section. Idempotent.
+	for _, page := range v.Pages {
+		for _, shape := range page.AllShapes() {
+			shape.normalizeTextFormatMarkers()
+		}
+	}
+	for _, master := range v.MasterPages {
+		for _, shape := range master.AllShapes() {
+			shape.normalizeTextFormatMarkers()
+		}
+	}
+
+	// windows.xml describes the in-Visio session's open windows
+	// (viewport position, ruler/grid toggles, etc.). Visio's resave
+	// strips those <Window> children — the next open re-creates them
+	// from defaults. Mirror that by removing the children but
+	// preserving the root <Windows> with its ClientWidth/Height.
+	if data, ok := v.ZipFileContents["visio/windows.xml"]; ok {
+		if stripped, err := stripWindowsChildren(data); err == nil {
+			v.ZipFileContents["visio/windows.xml"] = stripped
+		}
+	}
 
 	// Update pages XML back to zip contents
 	if v.pagesXML != nil {
@@ -1760,5 +1814,220 @@ func (v *VisioFile) refreshDocumentColorPalette() {
 		entry := colorsElem.CreateElement("ColorEntry")
 		entry.CreateAttr("IX", strconv.Itoa(maxIX))
 		entry.CreateAttr("RGB", c)
+	}
+}
+
+// faceNameMetrics is a hard-coded table of font metric attributes Visio
+// writes into <FaceName> entries when a font appears in a shape's
+// Char.Font cell. Values lifted directly from Visio's canonical resave
+// output. Fonts not in this table get a minimal entry — Visio accepts
+// it but the font UI's preview tooling may degrade.
+var faceNameMetrics = map[string]struct {
+	UnicodeRanges string
+	CharSets      string
+	Panose        string
+	Flags         string
+}{
+	"Calibri":         {"-469750017 -1040178053 9 0", "536871423 0", "2 15 5 2 2 2 4 3 2 4", "357"},
+	"Arial":           {"-536858881 -1073711013 9 0", "1073742335 -65536", "2 11 6 4 2 2 2 2 2 4", "325"},
+	"Times New Roman": {"-536858881 -1073711013 9 0", "1073742335 -65536", "2 2 6 3 5 4 5 2 3 4", "325"},
+	"Courier New":     {"-536858881 -1073711037 9 0", "1073742335 -65536", "2 7 3 9 2 2 5 2 4 4", "324"},
+	"Verdana":         {"-1610612033 1073750107 16 0", "536871423 0", "2 11 6 4 3 5 4 4 2 4", "325"},
+	"Tahoma":          {"-520081665 -1073717157 9 0", "1074266367 -65536", "2 11 6 4 3 5 4 4 2 4", "325"},
+	"Georgia":         {"-536858881 -1073711013 9 0", "1073742335 -65536", "2 4 5 2 5 4 5 2 3 3", "325"},
+}
+
+// refreshAppXMLHLinks rebuilds the <HLinks> element in docProps/app.xml
+// from every Hyperlink section across all shapes. Visio's resave emits
+// an HLinks vector tracking each hyperlink's address + subaddress so
+// external tools (search indexers, document property panes) can list
+// them without parsing every shape. Format per ECMA-376 §15.2.12.10:
+//
+//	<HLinks>
+//	  <vt:vector size='N*6' baseType='variant'>
+//	    <!-- per hyperlink -->
+//	    <vt:variant><vt:i4>0</vt:i4></vt:variant>  (col)
+//	    <vt:variant><vt:i4>0</vt:i4></vt:variant>  (row)
+//	    <vt:variant><vt:i4>0</vt:i4></vt:variant>  (page)
+//	    <vt:variant><vt:i4>4</vt:i4></vt:variant>  (hyperlink type flag)
+//	    <vt:variant><vt:lpwstr>address</vt:lpwstr></vt:variant>
+//	    <vt:variant><vt:lpwstr>subaddress</vt:lpwstr></vt:variant>
+//	  </vt:vector>
+//	</HLinks>
+//
+// HLinks is removed when there are no hyperlinks. Existing HLinks
+// content is replaced wholesale.
+func (v *VisioFile) refreshAppXMLHLinks() {
+	if v.appXML == nil || v.appXML.Root() == nil {
+		return
+	}
+	root := v.appXML.Root()
+
+	type hl struct{ addr, sub string }
+	var links []hl
+	collect := func(s *Shape) {
+		for _, sec := range s.xml.SelectElements("Section") {
+			if sec.SelectAttrValue("N", "") != "Hyperlink" {
+				continue
+			}
+			for _, row := range sec.SelectElements("Row") {
+				addr, sub := "", ""
+				for _, c := range row.SelectElements("Cell") {
+					switch c.SelectAttrValue("N", "") {
+					case "Address":
+						addr = c.SelectAttrValue("V", "")
+					case "SubAddress":
+						sub = c.SelectAttrValue("V", "")
+					}
+				}
+				if addr != "" || sub != "" {
+					links = append(links, hl{addr, sub})
+				}
+			}
+		}
+	}
+	for _, p := range v.Pages {
+		for _, s := range p.AllShapes() {
+			collect(s)
+		}
+	}
+
+	// Sort by address — Visio's canonical resave emits the vector in
+	// a deterministic order; alphabetical by address matches the
+	// observed Page-1-before-https resave.
+	sort.SliceStable(links, func(i, j int) bool {
+		return links[i].addr < links[j].addr
+	})
+
+	// Remove existing HLinks element so we can rewrite it from scratch.
+	if existing := root.FindElement("HLinks"); existing != nil {
+		root.RemoveChild(existing)
+	}
+
+	if len(links) == 0 {
+		return
+	}
+
+	hlinks := root.CreateElement("HLinks")
+	vec := hlinks.CreateElement("vt:vector")
+	vec.CreateAttr("size", strconv.Itoa(len(links)*6))
+	vec.CreateAttr("baseType", "variant")
+
+	emitI4 := func(n int) {
+		variant := vec.CreateElement("vt:variant")
+		i4 := variant.CreateElement("vt:i4")
+		i4.SetText(strconv.Itoa(n))
+	}
+	emitLpwstr := func(s string) {
+		variant := vec.CreateElement("vt:variant")
+		lps := variant.CreateElement("vt:lpwstr")
+		lps.SetText(s)
+	}
+	for _, l := range links {
+		emitI4(0)
+		emitI4(0)
+		emitI4(0)
+		emitI4(4)
+		emitLpwstr(l.addr)
+		emitLpwstr(l.sub)
+	}
+}
+
+// stripWindowsChildren removes all <Window> children from windows.xml's
+// root <Windows> element. Visio's canonical resave does this — open
+// windows are session state, not document state, and get recreated on
+// next open. Preserves the root element's attributes (ClientWidth,
+// ClientHeight).
+func stripWindowsChildren(data []byte) ([]byte, error) {
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(data); err != nil {
+		return nil, err
+	}
+	root := doc.Root()
+	if root == nil {
+		return data, nil
+	}
+	for _, c := range root.ChildElements() {
+		root.RemoveChild(c)
+	}
+	return writeXMLBytes(doc)
+}
+
+// refreshFaceNames appends a <FaceName> entry to document.xml's <FaceNames>
+// for every unique font referenced by a shape's Char.Font cell. Mirrors
+// what Visio's resave does so the document registers all in-use fonts.
+// Existing FaceName entries are left untouched (only appends).
+func (v *VisioFile) refreshFaceNames() {
+	if v.documentXML == nil || v.documentXML.Root() == nil {
+		return
+	}
+	root := v.documentXML.Root()
+	facesElem := root.FindElement("FaceNames")
+	if facesElem == nil {
+		// Insert <FaceNames> just before <StyleSheets> if absent. Visio's
+		// canonical order is DocumentSettings, Colors, FaceNames, StyleSheets.
+		facesElem = etree.NewElement("FaceNames")
+		if styleSheets := root.FindElement("StyleSheets"); styleSheets != nil {
+			styleSheetsIdx := -1
+			for i, child := range root.ChildElements() {
+				if child == styleSheets {
+					styleSheetsIdx = i
+					break
+				}
+			}
+			if styleSheetsIdx >= 0 {
+				root.InsertChildAt(styleSheetsIdx, facesElem)
+			} else {
+				root.AddChild(facesElem)
+			}
+		} else {
+			root.AddChild(facesElem)
+		}
+	}
+
+	existing := make(map[string]bool)
+	for _, fn := range facesElem.SelectElements("FaceName") {
+		name := fn.SelectAttrValue("NameU", "")
+		if name != "" {
+			existing[name] = true
+		}
+	}
+
+	// Collect all in-use fonts across pages + masters.
+	seen := make(map[string]bool)
+	collect := func(shape *Shape) {
+		if c, ok := shape.Cells["Char.Font"]; ok {
+			f := strings.TrimSpace(c.Value())
+			if f != "" && !existing[f] && !seen[f] {
+				seen[f] = true
+			}
+		}
+	}
+	for _, p := range v.Pages {
+		for _, s := range p.AllShapes() {
+			collect(s)
+		}
+	}
+	for _, mp := range v.MasterPages {
+		for _, s := range mp.AllShapes() {
+			collect(s)
+		}
+	}
+
+	// Stable order.
+	added := make([]string, 0, len(seen))
+	for f := range seen {
+		added = append(added, f)
+	}
+	sort.Strings(added)
+	for _, f := range added {
+		entry := facesElem.CreateElement("FaceName")
+		entry.CreateAttr("NameU", f)
+		if m, ok := faceNameMetrics[f]; ok {
+			entry.CreateAttr("UnicodeRanges", m.UnicodeRanges)
+			entry.CreateAttr("CharSets", m.CharSets)
+			entry.CreateAttr("Panose", m.Panose)
+			entry.CreateAttr("Flags", m.Flags)
+		}
 	}
 }

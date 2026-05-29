@@ -1501,6 +1501,85 @@ func (s *Shape) SetText(text string) {
 	textElem.SetText(text)
 }
 
+// normalizeTextFormatMarkers inserts <pp IX="0"/> / <cp IX="0"/> at the
+// head of the shape's <Text> element when the shape has a Paragraph or
+// Character section. Visio's canonical form prepends these markers so
+// the initial text run binds explicitly to row 0 of the formatting
+// section; without them readers fall back to defaults. Idempotent —
+// existing leading markers are detected and not duplicated.
+//
+// When inserting, any leading text inside <Text> moves to the Tail of
+// the last inserted marker so character order is preserved.
+func (s *Shape) normalizeTextFormatMarkers() {
+	textElem := s.xml.FindElement("Text")
+	if textElem == nil {
+		return
+	}
+
+	hasChar := false
+	hasPara := false
+	for _, sec := range s.xml.SelectElements("Section") {
+		switch sec.SelectAttrValue("N", "") {
+		case "Character":
+			hasChar = true
+		case "Paragraph":
+			hasPara = true
+		}
+	}
+	if !hasChar && !hasPara {
+		return
+	}
+
+	// Walk leading children to see which markers are already present.
+	hasLeadingPp := false
+	hasLeadingCp := false
+	for _, c := range textElem.ChildElements() {
+		switch c.Tag {
+		case "pp":
+			if c.SelectAttrValue("IX", "") == "0" {
+				hasLeadingPp = true
+				continue
+			}
+		case "cp":
+			if c.SelectAttrValue("IX", "") == "0" {
+				hasLeadingCp = true
+				continue
+			}
+		}
+		break // Non-marker or non-zero-IX marker stops the leading run.
+	}
+
+	needPp := hasPara && !hasLeadingPp
+	needCp := hasChar && !hasLeadingCp
+	if !needPp && !needCp {
+		return
+	}
+
+	// Capture any leading text so we can re-anchor it as the last
+	// new marker's Tail.
+	leadingText := textElem.Text()
+	textElem.SetText("")
+
+	idx := 0
+	var last *etree.Element
+	if needPp {
+		pp := etree.NewElement("pp")
+		pp.CreateAttr("IX", "0")
+		textElem.InsertChildAt(idx, pp)
+		idx++
+		last = pp
+	}
+	if needCp {
+		cp := etree.NewElement("cp")
+		cp.CreateAttr("IX", "0")
+		textElem.InsertChildAt(idx, cp)
+		last = cp
+	}
+	if last != nil && leadingText != "" {
+		last.SetTail(leadingText)
+	}
+}
+
 // AddGeometry creates a new empty Geometry section on the shape and returns it.
 // Use the returned Geometry's AddMoveTo/AddLineTo methods to define the path.
 func (s *Shape) AddGeometry() *Geometry {
