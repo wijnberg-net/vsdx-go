@@ -32,31 +32,32 @@ func fillPatternToSVG(patternType int, id, foreColor, backColor string, scale fl
 	// Background rectangle
 	svg.WriteString(fmt.Sprintf(`<rect width="%g" height="%g" fill="%s"/>`, size, size, backColor))
 
-	// Pattern-specific content
+	// Pattern-specific content. Visio's canonical pattern bitmaps (decoded
+	// from the base64 PNGs in Visio's SVG export) put the hatch on the
+	// tile EDGES, not centered — that's how adjacent tiles join into a
+	// continuous diagonal / grid / horizontal-line pattern. Earlier
+	// vsdx-go centered the strokes and added "bleed" pieces that produced
+	// a chaotic mess for patterns 2 and 5.
 	switch patternType {
-	case 2: // Diagonal lines (top-left to bottom-right)
+	case 2: // Thin diagonal upward (bottom-left → top-right). Single line.
+		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="%g" x2="%g" y2="0" stroke="%s" stroke-width="1"/>`, size, size, foreColor))
+
+	case 3: // L-shaped grid: top edge + left edge. Tiles into a square grid.
+		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="0" x2="%g" y2="0" stroke="%s" stroke-width="1"/>`, size, foreColor))
+		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="0" x2="0" y2="%g" stroke="%s" stroke-width="1"/>`, size, foreColor))
+
+	case 4: // Crosshatch (diagonal both ways).
 		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="0" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size, size, foreColor))
-		svg.WriteString(fmt.Sprintf(`<line x1="-%g" y1="0" x2="0" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, size/2, foreColor))
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="0" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, size, size/2, foreColor))
+		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="%g" x2="%g" y2="0" stroke="%s" stroke-width="1"/>`, size, size, foreColor))
 
-	case 3: // Grid (horizontal and vertical lines)
-		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="%g" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, size, size/2, foreColor))
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="0" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, size/2, size, foreColor))
-
-	case 4: // Crosshatch (diagonal both ways)
+	case 5: // Thin diagonal downward (top-left → bottom-right). Single line.
 		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="0" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size, size, foreColor))
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="0" x2="0" y2="%g" stroke="%s" stroke-width="1"/>`, size, size, foreColor))
 
-	case 5: // Diagonal lines (bottom-left to top-right)
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="0" x2="0" y2="%g" stroke="%s" stroke-width="1"/>`, size, size, foreColor))
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="0" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size, size/2, size/2, foreColor))
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="%g" x2="0" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, 0.0, size/2, foreColor))
+	case 6: // Horizontal line at top edge — tiles into evenly-spaced rows.
+		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="0" x2="%g" y2="0" stroke="%s" stroke-width="1"/>`, size, foreColor))
 
-	case 6: // Horizontal lines
-		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="%g" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, size, size/2, foreColor))
-
-	case 7: // Vertical lines
-		svg.WriteString(fmt.Sprintf(`<line x1="%g" y1="0" x2="%g" y2="%g" stroke="%s" stroke-width="1"/>`, size/2, size/2, size, foreColor))
+	case 7: // Vertical line at left edge — tiles into evenly-spaced columns.
+		svg.WriteString(fmt.Sprintf(`<line x1="0" y1="0" x2="0" y2="%g" stroke="%s" stroke-width="1"/>`, size, foreColor))
 
 	case 8: // Dense diagonal (narrow spacing)
 		for i := 0.0; i < size*2; i += size / 4 {
