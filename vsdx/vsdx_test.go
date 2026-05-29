@@ -3806,21 +3806,19 @@ func TestProtection(t *testing.T) {
 	r1.SetLockRotate(true)
 	r1.SetLockAspect(true)
 
-	// Verify Protection section exists
-	protSection := r1.XML().FindElement("Section[@N='Protection']")
-	if protSection == nil {
-		t.Fatal("Protection section should exist")
-	}
-
-	// Check individual cells
+	// Verify Lock* cells are written directly on the shape — Visio's
+	// canonical resave hoists Lock cells from any Protection section to
+	// the shape body, so vsdx-go's writer emits them at the shape level.
 	checkCell := func(name, want string) {
-		cell := protSection.FindElement("Row/Cell[@N='" + name + "']")
-		if cell == nil {
-			t.Errorf("cell %s not found", name)
-			return
+		var got string
+		for _, c := range r1.XML().SelectElements("Cell") {
+			if c.SelectAttrValue("N", "") == name {
+				got = c.SelectAttrValue("V", "")
+				break
+			}
 		}
-		if cell.SelectAttrValue("V", "") != want {
-			t.Errorf("%s = %q, want %q", name, cell.SelectAttrValue("V", ""), want)
+		if got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
 		}
 	}
 	checkCell("LockMoveX", "1")
@@ -3939,10 +3937,11 @@ func TestNetworkFeaturesRoundTrip(t *testing.T) {
 		t.Errorf("FillForegndTrans after reopen = %q, want '0'", r1v2.CellValue(CellFillForegndTrans))
 	}
 
-	// Verify protection
-	protSection := r1v2.XML().FindElement("Section[@N='Protection']")
-	if protSection == nil {
-		t.Error("Protection section missing after reopen")
+	// Verify protection. Visio's canonical resave writes Lock* cells as
+	// direct shape cells rather than inside a Protection section, so we
+	// check for the LockMoveX cell on the shape itself.
+	if r1v2.CellValue(CellLockMoveX) != "1" {
+		t.Errorf("LockMoveX after reopen = %q, want '1'", r1v2.CellValue(CellLockMoveX))
 	}
 
 	// Verify user cells

@@ -1336,6 +1336,7 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 	v.refreshDocumentColorPalette()
 	v.refreshFaceNames()
 	v.refreshAppXMLHLinks()
+	v.refreshPageRecalcTriggers()
 
 	// Every shape carrying Character/Paragraph sections gets a leading
 	// <cp IX="0"/> / <pp IX="0"/> marker on its <Text> element. Matches
@@ -1835,6 +1836,58 @@ var faceNameMetrics = map[string]struct {
 	"Verdana":         {"-1610612033 1073750107 16 0", "536871423 0", "2 11 6 4 3 5 4 4 2 4", "325"},
 	"Tahoma":          {"-520081665 -1073717157 9 0", "1074266367 -65536", "2 11 6 4 3 5 4 4 2 4", "325"},
 	"Georgia":         {"-536858881 -1073711013 9 0", "1073742335 -65536", "2 4 5 2 5 4 5 2 3 3", "325"},
+}
+
+// refreshPageRecalcTriggers ensures every <PageSheet> in pages.xml has
+// a <Trigger N='RecalcColor'> with a self-referencing RefBy. Visio's
+// canonical resave injects this on every page so a theme change can
+// fan out to all pages for color recalculation. Position matches
+// Visio's layout: between DrawingScaleType and InhibitSnap. Idempotent.
+func (v *VisioFile) refreshPageRecalcTriggers() {
+	if v.pagesXML == nil || v.pagesXML.Root() == nil {
+		return
+	}
+	for _, page := range v.pagesXML.Root().SelectElements("Page") {
+		pageID := page.SelectAttrValue("ID", "")
+		if pageID == "" {
+			continue
+		}
+		sheet := page.FindElement("PageSheet")
+		if sheet == nil {
+			continue
+		}
+		// Skip if a RecalcColor trigger is already present.
+		alreadyHas := false
+		for _, t := range sheet.SelectElements("Trigger") {
+			if t.SelectAttrValue("N", "") == "RecalcColor" {
+				alreadyHas = true
+				break
+			}
+		}
+		if alreadyHas {
+			continue
+		}
+		// Insert immediately after DrawingScaleType (or fall back to
+		// appending if that cell is absent).
+		trigger := etree.NewElement("Trigger")
+		trigger.CreateAttr("N", "RecalcColor")
+		refBy := trigger.CreateElement("RefBy")
+		refBy.CreateAttr("T", "Page")
+		refBy.CreateAttr("ID", pageID)
+
+		var anchor *etree.Element
+		for _, c := range sheet.SelectElements("Cell") {
+			if c.SelectAttrValue("N", "") == "DrawingScaleType" {
+				anchor = c
+				break
+			}
+		}
+		if anchor == nil {
+			sheet.AddChild(trigger)
+			continue
+		}
+		insertAfter(sheet, anchor, trigger)
+	}
 }
 
 // refreshAppXMLHLinks rebuilds the <HLinks> element in docProps/app.xml

@@ -920,7 +920,32 @@ func (s *Shape) SetTxtWidth(v float64) { s.SetCellValue(CellTxtWidth, fmtFloat(v
 func (s *Shape) SetTxtHeight(v float64) { s.SetCellValue(CellTxtHeight, fmtFloat(v)) }
 
 // SetTxtAngle sets the rotation angle of the text block in radians.
-func (s *Shape) SetTxtAngle(v float64) { s.SetCellValue(CellTxtAngle, fmtFloat(v)) }
+// Visio's canonical resave also emits TxtPinX/Y, TxtWidth/Height, and
+// TxtLocPinX/Y placeholder cells (V='0' U='NUM' F='No Formula') as a
+// group whenever the text block carries explicit framing, so we add
+// them here when they're not already present.
+func (s *Shape) SetTxtAngle(v float64) {
+	for _, name := range []string{
+		"TxtPinX", "TxtPinY", "TxtWidth", "TxtHeight",
+		"TxtLocPinX", "TxtLocPinY",
+	} {
+		has := false
+		for _, c := range s.xml.SelectElements("Cell") {
+			if c.SelectAttrValue("N", "") == name {
+				has = true
+				break
+			}
+		}
+		if !has {
+			c := s.xml.CreateElement("Cell")
+			c.CreateAttr("N", name)
+			c.CreateAttr("V", "0")
+			c.CreateAttr("U", "NUM")
+			c.CreateAttr("F", "No Formula")
+		}
+	}
+	s.SetCellValue(CellTxtAngle, fmtFloat(v))
+}
 
 // --- Protection ---
 
@@ -929,7 +954,18 @@ func (s *Shape) setLock(cell CellName, locked bool) {
 	if locked {
 		v = "1"
 	}
-	s.ensureSectionCell("Protection", cell, v)
+	// Visio's canonical resave writes Lock* cells as direct shape Cells
+	// (not inside a Protection section). Update an existing top-level
+	// Cell N=<name> if present; otherwise append one.
+	for _, c := range s.xml.SelectElements("Cell") {
+		if c.SelectAttrValue("N", "") == string(cell) {
+			c.CreateAttr("V", v)
+			return
+		}
+	}
+	c := s.xml.CreateElement("Cell")
+	c.CreateAttr("N", string(cell))
+	c.CreateAttr("V", v)
 }
 
 // SetLockMove locks or unlocks shape movement (both X and Y).
@@ -1035,13 +1071,18 @@ func (s *Shape) AddHyperlink(address, description string) {
 
 	row := section.CreateElement("Row")
 	row.CreateAttr("N", fmt.Sprintf("Row_%d", maxRow+1))
-	addCellXML(row, "Address", address, "")
+	// Cell order + F='No Formula' on defaults mirror Visio's canonical
+	// resave: Description, Address, SubAddress, ExtraInfo, Frame,
+	// NewWindow, Default, Invisible, SortKey.
 	addCellXML(row, "Description", description, "")
+	addCellXML(row, "Address", address, "")
 	addCellXML(row, "SubAddress", "", "")
 	addCellXML(row, "ExtraInfo", "", "")
 	addCellXML(row, "Frame", "", "")
+	addCellWithFormula(row, "NewWindow", "0", "No Formula", "")
 	addCellXML(row, "Default", "0", "")
 	addCellXML(row, "Invisible", "0", "")
+	addCellWithFormula(row, "SortKey", "", "No Formula", "")
 }
 
 // AddConnectionPoint adds a connection point to the shape at the given local coordinates.
@@ -1061,12 +1102,18 @@ func (s *Shape) AddConnectionPoint(x, y float64) {
 	}
 
 	row := section.CreateElement("Row")
+	row.CreateAttr("T", "Connection")
 	row.CreateAttr("IX", strconv.Itoa(maxIX+1))
 	addCellXML(row, "X", fmtFloat(x), "")
 	addCellXML(row, "Y", fmtFloat(y), "")
 	addCellXML(row, "DirX", "0", "")
 	addCellXML(row, "DirY", "0", "")
 	addCellXML(row, "Type", "0", "")
+	// Visio's canonical Connection row includes AutoGen and Prompt with
+	// F='No Formula'. They mark whether the connection point was
+	// auto-generated and the user-facing prompt label, respectively.
+	addCellWithFormula(row, "AutoGen", "0", "No Formula", "")
+	addCellWithFormula(row, "Prompt", "", "No Formula", "")
 }
 
 // SetLayerMember sets which layers this shape belongs to.
@@ -1588,12 +1635,16 @@ func (s *Shape) AddGeometry() *Geometry {
 	section.CreateAttr("N", "Geometry")
 	section.CreateAttr("IX", strconv.Itoa(geomIndex))
 
-	// WRITER_AUDIT.md §3: Visio writes NoShow/NoSnap/NoQuickDrag at the
-	// top of every Geometry section with V='0' F='No Formula'. They're
-	// defaults but Visio's canonical form always includes them.
+	// WRITER_AUDIT.md §3: Visio writes NoShow/NoSnap/NoQuickDrag plus
+	// NoFill/NoLine at the top of every Geometry section with
+	// V='0' F='No Formula'. They're defaults but Visio's canonical form
+	// always includes them. AddGeometryRect later overrides NoLine to
+	// '1' to suppress the rect's outline.
 	addCellWithFormula(section, "NoShow", "0", "No Formula", "")
 	addCellWithFormula(section, "NoSnap", "0", "No Formula", "")
 	addCellWithFormula(section, "NoQuickDrag", "0", "No Formula", "")
+	addCellWithFormula(section, "NoFill", "0", "No Formula", "")
+	addCellWithFormula(section, "NoLine", "0", "No Formula", "")
 
 	g := newGeometry(section, s, geomIndex)
 	s.Geometries = append(s.Geometries, g)
@@ -1609,10 +1660,15 @@ func (s *Shape) AddGeometry() *Geometry {
 // cells control the appearance.
 func (s *Shape) AddGeometryRect() *Geometry {
 	g := s.AddGeometry()
-	// Explicit NoFill=0 is required — without it, Visio may inherit NoFill
-	// from the stylesheet/theme and suppress the fill entirely.
-	addCellXML(g.xml, "NoFill", "0", "")
-	addCellXML(g.xml, "NoLine", "1", "")
+	// AddGeometry already populated NoFill='0' / NoLine='0' as canonical
+	// defaults. For a rect we want NoLine='1' (no outline) — update the
+	// existing cell rather than appending a duplicate. NoFill stays at 0.
+	for _, c := range g.xml.SelectElements("Cell") {
+		if c.SelectAttrValue("N", "") == "NoLine" {
+			c.CreateAttr("V", "1")
+			c.RemoveAttr("F")
+		}
+	}
 	g.AddRelMoveTo(0, 0)
 	g.AddRelLineTo(1, 0)
 	g.AddRelLineTo(1, 1)
@@ -2397,11 +2453,24 @@ func (s *Shape) ConnectionsABCD() []ConnectionABCD {
 }
 
 // AddConnectionABCD adds an extended connection point with direction.
+// Per MS-VSDX, ConnectionABCD rows live inside a Section N='Connection'
+// alongside regular Connection rows; the row's T attribute discriminates.
+// ConnectionABCD rows carry X, Y, A, B, C, D cells only (no DirX/DirY/Type
+// — those belong to T='Connection' rows). The dirX/dirY/connType
+// parameters are preserved by mapping them into A/B/C respectively so
+// callers can still serialize directional data; canonical Visio resave
+// typically zeroes A/B/C/D.
 func (s *Shape) AddConnectionABCD(x, y, dirX, dirY float64, connType int) int {
-	section := s.xml.FindElement("Section[@N='ConnectionABCD']")
+	// Canonical section name is "Connection". Fall back to legacy
+	// "ConnectionABCD" only if a Connection section doesn't yet exist
+	// and the caller already opened the legacy one.
+	section := s.xml.FindElement("Section[@N='Connection']")
+	if section == nil {
+		section = s.xml.FindElement("Section[@N='ConnectionABCD']")
+	}
 	if section == nil {
 		section = s.xml.CreateElement("Section")
-		section.CreateAttr("N", "ConnectionABCD")
+		section.CreateAttr("N", "Connection")
 	}
 
 	maxIX := -1
@@ -2413,15 +2482,13 @@ func (s *Shape) AddConnectionABCD(x, y, dirX, dirY float64, connType int) int {
 	ix := maxIX + 1
 
 	row := section.CreateElement("Row")
+	row.CreateAttr("T", "ConnectionABCD")
 	row.CreateAttr("IX", strconv.Itoa(ix))
 	addCellXML(row, "X", fmtFloat(x), "")
 	addCellXML(row, "Y", fmtFloat(y), "")
-	addCellXML(row, "DirX", fmtFloat(dirX), "")
-	addCellXML(row, "DirY", fmtFloat(dirY), "")
-	addCellXML(row, "Type", strconv.Itoa(connType), "")
-	addCellXML(row, "A", "0", "")
-	addCellXML(row, "B", "0", "")
-	addCellXML(row, "C", "0", "")
+	addCellXML(row, "A", fmtFloat(dirX), "")
+	addCellXML(row, "B", fmtFloat(dirY), "")
+	addCellXML(row, "C", strconv.Itoa(connType), "")
 	addCellXML(row, "D", "0", "")
 
 	return ix

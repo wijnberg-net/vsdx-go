@@ -571,13 +571,21 @@ func (p *Page) AddLayer(name string) int {
 
 	row := layerSection.CreateElement("Row")
 	row.CreateAttr("IX", strconv.Itoa(ix))
+	// Cell order mirrors Visio's canonical output: Name, Color, Status,
+	// Visible, Print, Active, Lock, Snap, Glue, NameUniv, ColorTrans.
+	// All cells that default to a value with no explicit formula carry
+	// F='No Formula' to match Visio's resave shape.
 	addCellXML(row, "Name", name, "")
+	addCellWithFormula(row, "Color", "0", "No Formula", "")
+	addCellWithFormula(row, "Status", "0", "No Formula", "")
 	addCellXML(row, "Visible", "1", "")
+	addCellXML(row, "Print", "1", "")
 	addCellXML(row, "Active", "0", "")
 	addCellXML(row, "Lock", "0", "")
-	addCellXML(row, "Print", "1", "")
 	addCellXML(row, "Snap", "1", "")
 	addCellXML(row, "Glue", "1", "")
+	addCellWithFormula(row, "NameUniv", "", "No Formula", "")
+	addCellWithFormula(row, "ColorTrans", "0", "No Formula", "")
 
 	return ix
 }

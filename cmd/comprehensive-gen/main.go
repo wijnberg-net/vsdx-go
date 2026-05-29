@@ -459,7 +459,8 @@ func buildFillsPage(v *vsdx.VisioFile) {
 func addFillGradient(p *vsdx.Page, sl slot, label string, angle float64, stops []vsdx.GradientStop) *vsdx.Shape {
 	s := _baseShape(p, sl, label)
 	s.SetCellValue("FillGradientEnabled", "1")
-	s.SetCellValue("FillGradientDir", "0") // linear
+	// FillGradientDir=0 (linear) is the default; Visio strips it on
+	// resave. Omitting it here mirrors that canonical form.
 	s.SetCellValue("FillGradientAngle", fmtFloat(angle))
 	addGradientSection(s, "FillGradient", stops)
 	return s
@@ -494,13 +495,21 @@ func addGradientSection(s *vsdx.Shape, sectionName string, stops []vsdx.Gradient
 		c.CreateAttr("N", "GradientStopColor")
 		c.CreateAttr("V", stop.Color)
 
-		c = row.CreateElement("Cell")
-		c.CreateAttr("N", "GradientStopPosition")
-		c.CreateAttr("V", fmtFloat(stop.Position))
-
-		c = row.CreateElement("Cell")
-		c.CreateAttr("N", "GradientStopColorTrans")
-		c.CreateAttr("V", fmtFloat(stop.Trans))
+		// Visio's canonical resave omits Position when its value is 0
+		// (the implicit default for the first stop) and omits ColorTrans
+		// when 0. Mirror that to avoid emitting no-op cells.
+		if stop.Position != 0 {
+			c = row.CreateElement("Cell")
+			c.CreateAttr("N", "GradientStopColorTrans")
+			c.CreateAttr("V", fmtFloat(stop.Trans))
+			c = row.CreateElement("Cell")
+			c.CreateAttr("N", "GradientStopPosition")
+			c.CreateAttr("V", fmtFloat(stop.Position))
+		} else if stop.Trans != 0 {
+			c = row.CreateElement("Cell")
+			c.CreateAttr("N", "GradientStopColorTrans")
+			c.CreateAttr("V", fmtFloat(stop.Trans))
+		}
 	}
 }
 
@@ -652,13 +661,20 @@ func addArrowConnector(v *vsdx.VisioFile, p *vsdx.Page, cx, cy, length float64,
 	}
 	conn.SetLineColor("#222222")
 	conn.SetLineWeight(0.022)
+	// Visio's resave strips BeginArrowSize / EndArrowSize when the size
+	// equals the stylesheet default of 2. Mirror that to avoid carrying
+	// no-op cells across round-trips.
 	if beginArrow > 0 {
 		conn.SetBeginArrow(beginArrow)
-		conn.SetCellValue("BeginArrowSize", strconv.Itoa(size))
+		if size != 2 {
+			conn.SetCellValue("BeginArrowSize", strconv.Itoa(size))
+		}
 	}
 	if endArrow > 0 {
 		conn.SetEndArrow(endArrow)
-		conn.SetCellValue("EndArrowSize", strconv.Itoa(size))
+		if size != 2 {
+			conn.SetCellValue("EndArrowSize", strconv.Itoa(size))
+		}
 	}
 	conn.SetText(label)
 	return conn
