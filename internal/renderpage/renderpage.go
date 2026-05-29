@@ -27,7 +27,7 @@ func Render(page *vsdx.Page, pageW, pageH float64) (string, error) {
 	viewW := pageW * ppi
 	viewH := pageH * ppi
 
-	sb.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.4fin" height="%.4fin" viewBox="0 0 %.2f %.2f">`, pageW, pageH, viewW, viewH))
+	sb.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="%.4fin" height="%.4fin" viewBox="0 0 %.2f %.2f">`, pageW, pageH, viewW, viewH))
 	sb.WriteString("\n")
 
 	for _, shape := range page.ChildShapes() {
@@ -76,6 +76,17 @@ func Render(page *vsdx.Page, pageW, pageH float64) (string, error) {
 		// without being mirror-flipped.
 		flipX := shape.FlipX()
 		flipY := shape.FlipY()
+		// Wrap the shape in <a xlink:href> when it carries a Hyperlink.
+		// Matches Visio's SVG export which emits <a> wrappers around
+		// hyperlink-bearing shapes so the rendered SVG is interactive.
+		hyperHref, hyperTitle := shape.Hyperlink()
+		if hyperHref != "" {
+			if hyperTitle != "" {
+				sb.WriteString(fmt.Sprintf(`<a xlink:href=%q xlink:title=%q>`, hyperHref, hyperTitle))
+			} else {
+				sb.WriteString(fmt.Sprintf(`<a xlink:href=%q>`, hyperHref))
+			}
+		}
 		if !flipX && !flipY {
 			sb.WriteString(fmt.Sprintf(`<g transform="translate(%.2f %.2f)">`, x, y))
 			sb.WriteString(inner)
@@ -102,6 +113,9 @@ func Render(page *vsdx.Page, pageW, pageH float64) (string, error) {
 			sb.WriteString(`</g>`)
 			sb.WriteString(text)
 			sb.WriteString("</g>\n")
+		}
+		if hyperHref != "" {
+			sb.WriteString("</a>\n")
 		}
 	}
 

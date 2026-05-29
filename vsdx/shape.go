@@ -981,6 +981,28 @@ func (s *Shape) UserCellValue(name string) string {
 	return cell.SelectAttrValue("V", "")
 }
 
+// Hyperlink returns the first hyperlink on the shape as (address, description).
+// Returns empty strings if the shape has no hyperlink.
+func (s *Shape) Hyperlink() (address, description string) {
+	section := s.xml.FindElement("Section[@N='Hyperlink']")
+	if section == nil {
+		return "", ""
+	}
+	row := section.FindElement("Row")
+	if row == nil {
+		return "", ""
+	}
+	for _, c := range row.SelectElements("Cell") {
+		switch c.SelectAttrValue("N", "") {
+		case "Address":
+			address = c.SelectAttrValue("V", "")
+		case "Description":
+			description = c.SelectAttrValue("V", "")
+		}
+	}
+	return address, description
+}
+
 // AddHyperlink adds a hyperlink to the shape.
 func (s *Shape) AddHyperlink(address, description string) {
 	section := s.xml.FindElement("Section[@N='Hyperlink']")
