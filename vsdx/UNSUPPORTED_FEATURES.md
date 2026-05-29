@@ -189,6 +189,22 @@ correctly but the SVG export currently doesn't show it.
 | Custom file properties (docProps/custom.xml) | ✓ | ✓ | — |
 | HLinks tracking in app.xml | ✓ | auto-refresh | — |
 
+## Cross-bundle / Stencil import
+
+| Feature | Model | API | Render |
+|---|---|---|---|
+| Create master from scratch (CreateMaster) | ✓ | ✓ | — |
+| Duplicate master within bundle (DuplicateMaster) | ✓ | ✓ | — |
+| Import master from another bundle (`ImportMaster`) | ✓ | ✓ `VisioFile.ImportMaster` / `ImportMasterWithOptions` | — |
+| Convenience: import + instantiate in one call | ✓ | ✓ `Page.AddShapeFromExternalMaster` | — |
+| UniqueID-based dedup (idempotent re-import) | ✓ | auto | — |
+| Sub-master recursion (BaseID + nested Master refs) | ✓ | auto | — |
+| Dynamic-connector master reuse (no duplication) | ✓ | auto | — |
+| Foreign data media copy + collision-safe rename | ✓ | auto | — |
+| Theme cell inlining (THEMEGUARD / THEMEVAL → V) | ✓ | `ImportOptions{InlineTheme: bool}` (default true) | — |
+| Content_Types Default Extension auto-add | ✓ | auto | — |
+| Master rels file deep-copy + Target rewrite | ✓ | auto | — |
+
 ## Formulas
 
 | Feature | Model | API | Render |
