@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -473,25 +474,39 @@ func (v *VisioFile) AddPageAt(index int, name string) (*Page, error) {
 	pagesheetElem.CreateAttr("LineStyle", "0")
 	pagesheetElem.CreateAttr("TextStyle", "0")
 
-	defaultCells := []struct{ name, value string }{
-		{"PageWidth", "8.26771653543307"},
-		{"PageHeight", "11.69291338582677"},
-		{"ShdwOffsetX", "0.1181102362204724"},
-		{"ShdwOffsetY", "-0.1181102362204724"},
-		{"DrawingSizeType", "0"},
-		{"DrawingScaleType", "0"},
-		{"InhibitSnap", "0"},
-		{"UIVisibility", "0"},
-		{"ShdwType", "0"},
-		{"ShdwObliqueAngle", "0"},
-		{"ShdwScaleFactor", "1"},
-		{"DrawingResizeType", "1"},
-		{"PageShapeSplit", "1"},
+	// WRITER_AUDIT.md §5: Visio writes 4 additional PageSheet defaults
+	// we previously omitted (PageScale, DrawingScale, PageLockReplace,
+	// PageLockDuplicate). Adding them keeps byte-diffs against a Visio
+	// resave tight. PageScale / DrawingScale carry U='IN' on Visio's
+	// canonical form.
+	defaultCells := []struct {
+		name, value, unit string
+	}{
+		{"PageWidth", "8.26771653543307", ""},
+		{"PageHeight", "11.69291338582677", ""},
+		{"ShdwOffsetX", "0.1181102362204724", ""},
+		{"ShdwOffsetY", "-0.1181102362204724", ""},
+		{"PageScale", "1", "IN"},
+		{"DrawingScale", "1", "IN"},
+		{"DrawingSizeType", "0", ""},
+		{"DrawingScaleType", "0", ""},
+		{"InhibitSnap", "0", ""},
+		{"PageLockReplace", "0", ""},
+		{"PageLockDuplicate", "0", ""},
+		{"UIVisibility", "0", ""},
+		{"ShdwType", "0", ""},
+		{"ShdwObliqueAngle", "0", ""},
+		{"ShdwScaleFactor", "1", ""},
+		{"DrawingResizeType", "1", ""},
+		{"PageShapeSplit", "1", ""},
 	}
 	for _, c := range defaultCells {
 		cell := pagesheetElem.CreateElement("Cell")
 		cell.CreateAttr("N", c.name)
 		cell.CreateAttr("V", c.value)
+		if c.unit != "" {
+			cell.CreateAttr("U", c.unit)
+		}
 	}
 
 	// Create Page element for pages.xml
@@ -546,7 +561,7 @@ func (v *VisioFile) CopyPage(page *Page, index int, name string) (*Page, error) 
 	}
 
 	// Serialize source page content XML
-	pageContentBytes, err := page.xml.WriteToBytes()
+	pageContentBytes, err := writeXMLBytes(page.xml)
 	if err != nil {
 		return nil, fmt.Errorf("serializing page %q content: %w", page.Name(), err)
 	}
@@ -1202,16 +1217,22 @@ func (v *VisioFile) updateIDs(shape *etree.Element, idMap map[string]string) {
 // SaveVsdxBytes serializes the VisioFile to an in-memory .vsdx (ZIP) and returns the bytes.
 // All modified XML documents are written back into the zip contents before building the archive.
 func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
+	// WRITER_AUDIT.md §6: refresh document color palette so every #RRGGBB
+	// used by a shape appears as a ColorEntry. Visio's resave does this
+	// automatically; before this hook ran our document.xml shipped a static
+	// 25-entry palette regardless of which colors the shapes used.
+	v.refreshDocumentColorPalette()
+
 	// Update pages XML back to zip contents
 	if v.pagesXML != nil {
-		data, err := v.pagesXML.WriteToBytes()
+		data, err := writeXMLBytes(v.pagesXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing pages.xml: %w", err)
 		}
 		v.ZipFileContents["visio/pages/pages.xml"] = data
 	}
 	if v.pagesXMLRels != nil {
-		data, err := v.pagesXMLRels.WriteToBytes()
+		data, err := writeXMLBytes(v.pagesXMLRels)
 		if err != nil {
 			return nil, fmt.Errorf("serializing pages.xml.rels: %w", err)
 		}
@@ -1221,14 +1242,14 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 	// Update each page XML and page-level rels
 	for _, page := range v.Pages {
 		if page.xml != nil {
-			data, err := page.xml.WriteToBytes()
+			data, err := writeXMLBytes(page.xml)
 			if err != nil {
 				return nil, fmt.Errorf("serializing %s: %w", page.filename, err)
 			}
 			v.ZipFileContents[page.filename] = data
 		}
 		if page.RelsXML != nil && page.RelsXMLFile != "" {
-			data, err := page.RelsXML.WriteToBytes()
+			data, err := writeXMLBytes(page.RelsXML)
 			if err != nil {
 				return nil, fmt.Errorf("serializing %s: %w", page.RelsXMLFile, err)
 			}
@@ -1242,14 +1263,14 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 	// reload the original master at next open. Mirrors the pages loop above.
 	for _, master := range v.MasterPages {
 		if master.xml != nil {
-			data, err := master.xml.WriteToBytes()
+			data, err := writeXMLBytes(master.xml)
 			if err != nil {
 				return nil, fmt.Errorf("serializing %s: %w", master.filename, err)
 			}
 			v.ZipFileContents[master.filename] = data
 		}
 		if master.RelsXML != nil && master.RelsXMLFile != "" {
-			data, err := master.RelsXML.WriteToBytes()
+			data, err := writeXMLBytes(master.RelsXML)
 			if err != nil {
 				return nil, fmt.Errorf("serializing %s: %w", master.RelsXMLFile, err)
 			}
@@ -1265,49 +1286,49 @@ func (v *VisioFile) SaveVsdxBytes() ([]byte, error) {
 
 	// Update other XML files
 	if v.rootRelsXML != nil {
-		data, err := v.rootRelsXML.WriteToBytes()
+		data, err := writeXMLBytes(v.rootRelsXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing _rels/.rels: %w", err)
 		}
 		v.ZipFileContents["_rels/.rels"] = data
 	}
 	if v.contentTypesXML != nil {
-		data, err := v.contentTypesXML.WriteToBytes()
+		data, err := writeXMLBytes(v.contentTypesXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing [Content_Types].xml: %w", err)
 		}
 		v.ZipFileContents["[Content_Types].xml"] = data
 	}
 	if v.appXML != nil {
-		data, err := v.appXML.WriteToBytes()
+		data, err := writeXMLBytes(v.appXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing app.xml: %w", err)
 		}
 		v.ZipFileContents["docProps/app.xml"] = data
 	}
 	if v.coreXML != nil {
-		data, err := v.coreXML.WriteToBytes()
+		data, err := writeXMLBytes(v.coreXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing core.xml: %w", err)
 		}
 		v.ZipFileContents["docProps/core.xml"] = data
 	}
 	if v.customXML != nil {
-		data, err := v.customXML.WriteToBytes()
+		data, err := writeXMLBytes(v.customXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing custom.xml: %w", err)
 		}
 		v.ZipFileContents["docProps/custom.xml"] = data
 	}
 	if v.documentXML != nil {
-		data, err := v.documentXML.WriteToBytes()
+		data, err := writeXMLBytes(v.documentXML)
 		if err != nil {
 			return nil, fmt.Errorf("serializing document.xml: %w", err)
 		}
 		v.ZipFileContents["visio/document.xml"] = data
 	}
 	if v.documentXMLRels != nil {
-		data, err := v.documentXMLRels.WriteToBytes()
+		data, err := writeXMLBytes(v.documentXMLRels)
 		if err != nil {
 			return nil, fmt.Errorf("serializing document.xml.rels: %w", err)
 		}
@@ -1579,4 +1600,79 @@ func (v *VisioFile) RootRelationships() []struct {
 	}
 
 	return rels
+}
+
+// refreshDocumentColorPalette appends a <ColorEntry> row to the document's
+// <Colors> palette for every unique #RRGGBB found in any shape's colour-
+// bearing cells. Visio's canonical save does the same: each shape colour
+// gets an entry so the document picker / palette UI knows about it.
+//
+// Existing palette entries are left untouched (we only append). The scan
+// covers FillForegnd, FillBkgnd, LineColor, ShdwForegnd, ShdwBkgnd, and
+// Char.Color cells across every shape on every page and master.
+func (v *VisioFile) refreshDocumentColorPalette() {
+	if v.documentXML == nil || v.documentXML.Root() == nil {
+		return
+	}
+	colorsElem := v.documentXML.Root().FindElement("Colors")
+	if colorsElem == nil {
+		return
+	}
+
+	// Track existing palette RGBs and the max IX so we can append.
+	existing := make(map[string]bool)
+	maxIX := -1
+	for _, entry := range colorsElem.SelectElements("ColorEntry") {
+		rgb := strings.ToUpper(entry.SelectAttrValue("RGB", ""))
+		if rgb != "" {
+			existing[rgb] = true
+		}
+		if ix := entry.SelectAttrValue("IX", ""); ix != "" {
+			if n, err := strconv.Atoi(ix); err == nil && n > maxIX {
+				maxIX = n
+			}
+		}
+	}
+
+	// Walk every shape on every page + master and collect colours.
+	seen := make(map[string]bool)
+	addIfNew := func(c string) {
+		c = strings.ToUpper(strings.TrimSpace(c))
+		if len(c) == 7 && c[0] == '#' && !existing[c] && !seen[c] {
+			seen[c] = true
+		}
+	}
+	scanCells := func(shape *Shape) {
+		for _, name := range []string{
+			"FillForegnd", "FillBkgnd", "LineColor",
+			"ShdwForegnd", "ShdwBkgnd", "Char.Color",
+		} {
+			if c, ok := shape.Cells[name]; ok {
+				addIfNew(c.Value())
+			}
+		}
+	}
+	for _, p := range v.Pages {
+		for _, s := range p.AllShapes() {
+			scanCells(s)
+		}
+	}
+	for _, mp := range v.MasterPages {
+		for _, s := range mp.AllShapes() {
+			scanCells(s)
+		}
+	}
+
+	// Stable order: sort by hex so successive runs produce identical output.
+	added := make([]string, 0, len(seen))
+	for c := range seen {
+		added = append(added, c)
+	}
+	sort.Strings(added)
+	for _, c := range added {
+		maxIX++
+		entry := colorsElem.CreateElement("ColorEntry")
+		entry.CreateAttr("IX", strconv.Itoa(maxIX))
+		entry.CreateAttr("RGB", c)
+	}
 }

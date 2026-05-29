@@ -55,7 +55,7 @@ func (m *Media) Line() *Shape {
 func (m *Media) RelsXML() []byte {
 	page := m.vis.Pages[0]
 	if page.RelsXML != nil {
-		data, _ := page.RelsXML.WriteToBytes()
+		data, _ := writeXMLBytes(page.RelsXML)
 		return data
 	}
 	return nil

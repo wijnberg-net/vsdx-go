@@ -264,7 +264,7 @@ func (v *VisioFile) getOrCreateCommentsXML() *etree.Element {
 	root.CreateElement("CommentList")
 
 	// Store in zip contents
-	data, _ := doc.WriteToBytes()
+	data, _ := writeXMLBytes(doc)
 	v.ZipFileContents["visio/comments.xml"] = data
 
 	// Add to content types
@@ -337,7 +337,7 @@ func (v *VisioFile) markCommentsModified() {
 		doc := etree.NewDocument()
 		doc.CreateProcInst("xml", `version="1.0" encoding="UTF-8" standalone="yes"`)
 		doc.SetRoot(root.Copy())
-		if data, err := doc.WriteToBytes(); err == nil {
+		if data, err := writeXMLBytes(doc); err == nil {
 			v.ZipFileContents["visio/comments.xml"] = data
 		}
 	}
@@ -372,7 +372,7 @@ func (v *VisioFile) addContentType(partName, contentType string) {
 	override.CreateAttr("PartName", partName)
 	override.CreateAttr("ContentType", contentType)
 
-	data, _ = doc.WriteToBytes()
+	data, _ = writeXMLBytes(doc)
 	v.ZipFileContents["[Content_Types].xml"] = data
 }
 
@@ -418,6 +418,6 @@ func (v *VisioFile) addRelationship(target, relType string) {
 	rel.CreateAttr("Type", relType)
 	rel.CreateAttr("Target", target)
 
-	data, _ = doc.WriteToBytes()
+	data, _ = writeXMLBytes(doc)
 	v.ZipFileContents[relPath] = data
 }

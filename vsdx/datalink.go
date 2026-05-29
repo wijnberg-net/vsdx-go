@@ -292,7 +292,7 @@ func (v *VisioFile) CreateDataRecordSet(name string, columns []string) *DataReco
 	rsElem.CreateElement("DataRecords")
 
 	// Save
-	data, _ = doc.WriteToBytes()
+	data, _ = writeXMLBytes(doc)
 	v.ZipFileContents["visio/data/recordsets.xml"] = data
 
 	return &DataRecordSet{

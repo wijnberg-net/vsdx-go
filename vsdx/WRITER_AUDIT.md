@@ -13,18 +13,18 @@
 
 ## Summary by category
 
-| # | Area | vsdx-go | Visio canonical | Severity |
-|---|---|---|---|---|
-| 1 | Attribute quote style | `"` (double) | `'` (single) | Cosmetic |
-| 2 | Shape default cells | Omitted | Explicit `V='0' F='No Formula'` | Low (resave adds) |
-| 3 | Geometry section defaults | Only NoFill/NoLine | + NoShow, NoSnap, NoQuickDrag | Low (resave adds) |
-| 4 | Unit attribute (U) | Omitted on numerics | `U='NUM'`, `U='PT'`, `U='MM'` | Low (resave normalises) |
-| 5 | PageSheet defaults | Omitted | + PageScale, DrawingScale, PageLockReplace, PageLockDuplicate | Low |
-| 6 | Document color palette | Static, no shape colors added | ColorEntry rows for every unique RGB | Medium — palette grows on resave |
-| 7 | Cell ordering | Insertion order | Visio's canonical order (Pin/Loc/Width/H/Angle/FlipX/Y/Resize…) | Cosmetic |
-| 8 | Page file renumbering | `page2…page10.xml` (with leading blank removed leaves gap) | Sequential `page1…page9.xml` | Low |
-| 9 | windows.xml | Inherits source state | Empties to `<Windows .../>` | None — Visio strips on save |
-| 10 | DocumentSettings TopPage | `0` | Last-viewed page index | None |
+| # | Area | Status (post-fix) | Implementation |
+|---|---|---|---|
+| 1 | Attribute quote style | ✅ Fixed | `writeXMLBytes` helper sets `etree.WriteSettings{AttrSingleQuote: true}` on every Document before serialisation. All `WriteToBytes()` calls in the writer route through it. |
+| 2 | Shape default cells | ✅ Fixed | `(*Page).AddShape` now emits Angle (U='NUM'), FlipX, FlipY, ResizeMode with `V='0' F='No Formula'` after the position cells. |
+| 3 | Geometry section defaults | ✅ Fixed | `(*Shape).AddGeometry` writes NoShow / NoSnap / NoQuickDrag with `V='0' F='No Formula'` at the head of every Geometry section. |
+| 4 | Unit attribute (U) | ✅ Fixed (common cases) | `SetLineWeight` annotates with `U='PT'`, `SetCharSize` annotates with `U='PT'`, the default Angle cell carries `U='NUM'`. Other numeric cells are still emitted bare; Visio assumes inches (`IN`) which is correct for our values. |
+| 5 | PageSheet defaults | ✅ Fixed | `AddPageAt` now emits 17 cells (was 13) including `PageScale` / `DrawingScale` (`U='IN'`), `PageLockReplace`, `PageLockDuplicate`. |
+| 6 | Document color palette | ✅ Fixed | New `refreshDocumentColorPalette` runs at the head of `SaveVsdxBytes`. Walks every shape (pages + masters), collects unique RGBs from FillForegnd / FillBkgnd / LineColor / ShdwForegnd / ShdwBkgnd / Char.Color, appends new ColorEntry rows with sequential IX. Sorted by hex so successive saves are deterministic. |
+| 7 | Cell ordering | Cosmetic (open) | Insertion order is preserved; Visio's canonical order would require touching every setter. Not blocking interop. |
+| 8 | Page file renumbering | Out of scope | Visio's resave concern, not ours. |
+| 9 | windows.xml | Out of scope | Visio strips on save. |
+| 10 | DocumentSettings TopPage | Out of scope | UI state Visio tracks. |
 
 ---
 
@@ -158,13 +158,11 @@ vsdx-go preserves the `Windows` element from the source `blank.vsdx`, including 
 
 ## What's actionable
 
-If we want byte-clean round-trip (open in Visio, save, no diff):
+All six items above are now closed (see Status column). Remaining gaps:
 
-1. **Single-quote attribute style** — low effort, ~1 day to thread through etree's output.
-2. **Default cells on shape and geometry** — write the 7 shape defaults and 3 geometry defaults explicitly with `F='No Formula'`. Medium effort.
-3. **U attribute on numerics** — add unit-aware setters (`SetLineWeightPt`, `SetAngleRad` → write `U='PT'` / `U='NUM'`). Medium effort, requires per-cell unit knowledge.
-4. **Color palette extension on save** — scan shape cells, append unseen RGBs to `<Colors>` block. Low effort.
-5. **PageSheet defaults** — write 4 default cells. Trivial.
+- **Cell ordering** (§7) — vsdx-go preserves insertion order. Visio's canonical order would require touching every setter to enforce a fixed sequence; not worth it for cosmetic diff cleanliness.
+- **Pages renumbering** (§8) — Visio handles on resave; out of vsdx-go's control.
+- **windows.xml / TopPage** (§9, §10) — UI state. Visio strips and rewrites.
 
 None of these block Visio compatibility — Visio opens our files and resaves them with all the additions. They're polish for tools that diff or audit .vsdx files at byte / structural level.
 

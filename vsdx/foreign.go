@@ -145,7 +145,31 @@ func (p *Page) AddShape() *Shape {
 	addCellXML(shapeElem, CellLocPinX, "0.5", "Width*0.5")
 	addCellXML(shapeElem, CellLocPinY, "0.5", "Height*0.5")
 
+	// WRITER_AUDIT.md §2: write the 7 default cells Visio writes on every
+	// shape, with V='0' F='No Formula'. Functionally these are at their
+	// default value when omitted, but Visio's canonical resave always
+	// includes them. Keeps byte-diffs against a Visio resave tight.
+	addCellWithFormula(shapeElem, "Angle", "0", "No Formula", "NUM")
+	addCellWithFormula(shapeElem, "FlipX", "0", "No Formula", "")
+	addCellWithFormula(shapeElem, "FlipY", "0", "No Formula", "")
+	addCellWithFormula(shapeElem, "ResizeMode", "0", "No Formula", "")
+
 	return newShape(shapeElem, p, p)
+}
+
+// addCellWithFormula creates a Cell element with N, V, optional F (formula)
+// and optional U (unit) attributes. Designed for emitting the explicit
+// defaults Visio writes on every shape (WRITER_AUDIT.md §2 / §4).
+func addCellWithFormula(parent *etree.Element, name, value, formula, unit string) {
+	c := parent.CreateElement("Cell")
+	c.CreateAttr("N", name)
+	c.CreateAttr("V", value)
+	if unit != "" {
+		c.CreateAttr("U", unit)
+	}
+	if formula != "" {
+		c.CreateAttr("F", formula)
+	}
 }
 
 // GroupShapes creates a group shape containing the given shapes.

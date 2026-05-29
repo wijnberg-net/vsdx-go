@@ -652,6 +652,12 @@ func (s *Shape) TextStyleID() string { return s.xml.SelectAttrValue("TextStyle",
 func (s *Shape) SetLineWeight(v float64) {
 	s.SetCellValue(CellLineWeight, fmtFloat(v))
 	s.clearCellFormula(CellLineWeight)
+	// WRITER_AUDIT.md §4: Visio annotates LineWeight with U='PT' even
+	// though the stored value is in inches. The U attribute is a display-
+	// unit hint; emit it so byte-diffs against a Visio resave line up.
+	if c, ok := s.Cells[string(CellLineWeight)]; ok {
+		c.SetUnit("PT")
+	}
 }
 // SetLineColor sets the line color to an explicit literal and clears any
 // theme-binding formula on that cell. Without the F clear, an existing
@@ -727,8 +733,14 @@ func (s *Shape) setCharStyleBit(bit int, on bool) {
 }
 
 // SetCharSize sets the font size in points (e.g., 12 for 12pt).
+// Character.Size is stored as inches per MS-VSDX; Visio displays as points
+// via the U='PT' annotation we emit alongside.
 func (s *Shape) SetCharSize(pt float64) {
 	s.ensureCharacterCell("Size", fmtFloat(pt/72.0))
+	// Match Visio's canonical U='PT' annotation on Char.Size cells.
+	if c, ok := s.Cells["Char.Size"]; ok {
+		c.SetUnit("PT")
+	}
 }
 
 // SetCharFont sets the font name for the shape's text.
@@ -1496,6 +1508,13 @@ func (s *Shape) AddGeometry() *Geometry {
 	section := s.xml.CreateElement("Section")
 	section.CreateAttr("N", "Geometry")
 	section.CreateAttr("IX", strconv.Itoa(geomIndex))
+
+	// WRITER_AUDIT.md §3: Visio writes NoShow/NoSnap/NoQuickDrag at the
+	// top of every Geometry section with V='0' F='No Formula'. They're
+	// defaults but Visio's canonical form always includes them.
+	addCellWithFormula(section, "NoShow", "0", "No Formula", "")
+	addCellWithFormula(section, "NoSnap", "0", "No Formula", "")
+	addCellWithFormula(section, "NoQuickDrag", "0", "No Formula", "")
 
 	g := newGeometry(section, s, geomIndex)
 	s.Geometries = append(s.Geometries, g)

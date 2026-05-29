@@ -154,7 +154,7 @@ func CreateStencil() *Stencil {
 	rel.CreateAttr("Type", "http://schemas.microsoft.com/visio/2010/relationships/masters")
 	rel.CreateAttr("Target", "visio/masters/masters.xml")
 
-	if relsBytes, err := relsDoc.WriteToBytes(); err == nil {
+	if relsBytes, err := writeXMLBytes(relsDoc); err == nil {
 		st.ZipFileContents["_rels/.rels"] = relsBytes
 	}
 
@@ -164,7 +164,7 @@ func CreateStencil() *Stencil {
 	masterRels := masterRelsDoc.CreateElement("Relationships")
 	masterRels.CreateAttr("xmlns", PkgRelNS)
 
-	if masterRelsBytes, err := masterRelsDoc.WriteToBytes(); err == nil {
+	if masterRelsBytes, err := writeXMLBytes(masterRelsDoc); err == nil {
 		st.ZipFileContents["visio/masters/_rels/masters.xml.rels"] = masterRelsBytes
 	}
 
@@ -232,7 +232,7 @@ func (st *Stencil) AddMaster(master *Page) error {
 	// Store master content XML.
 	masterFilename := fmt.Sprintf("visio/masters/master%d.xml", newID)
 	if master.xml != nil {
-		if bytes, err := master.xml.WriteToBytes(); err == nil {
+		if bytes, err := writeXMLBytes(master.xml); err == nil {
 			st.ZipFileContents[masterFilename] = bytes
 		}
 	}
@@ -288,7 +288,7 @@ func (st *Stencil) addMasterRel(relID, target string) {
 	rel.CreateAttr("Type", "http://schemas.microsoft.com/visio/2010/relationships/master")
 	rel.CreateAttr("Target", target)
 
-	if bytes, err := relsDoc.WriteToBytes(); err == nil {
+	if bytes, err := writeXMLBytes(relsDoc); err == nil {
 		st.ZipFileContents[relsPath] = bytes
 	}
 }
@@ -303,14 +303,14 @@ func (st *Stencil) SaveVssx(filename string) error {
 		doc := etree.NewDocument()
 		doc.CreateProcInst("xml", `version="1.0" encoding="UTF-8" standalone="yes"`)
 		doc.SetRoot(st.mastersXML.Copy())
-		if bytes, err := doc.WriteToBytes(); err == nil {
+		if bytes, err := writeXMLBytes(doc); err == nil {
 			st.ZipFileContents["visio/masters/masters.xml"] = bytes
 		}
 	}
 
 	// Update [Content_Types].xml.
 	if st.contentTypesXML != nil {
-		if bytes, err := st.contentTypesXML.WriteToBytes(); err == nil {
+		if bytes, err := writeXMLBytes(st.contentTypesXML); err == nil {
 			st.ZipFileContents["[Content_Types].xml"] = bytes
 		}
 	}
@@ -344,7 +344,7 @@ func (st *Stencil) ImportToDocument(vis *VisioFile) error {
 
 		// Copy content from stencil master.
 		if master.xml != nil {
-			if bytes, err := master.xml.WriteToBytes(); err == nil {
+			if bytes, err := writeXMLBytes(master.xml); err == nil {
 				newDoc := etree.NewDocument()
 				if err := newDoc.ReadFromBytes(bytes); err == nil {
 					newMaster.xml = newDoc

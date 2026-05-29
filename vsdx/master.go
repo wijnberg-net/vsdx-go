@@ -99,7 +99,7 @@ func (v *VisioFile) CreateMaster(name string) (*Page, error) {
 
 	// Store master content XML.
 	masterFilename := fmt.Sprintf("visio/masters/master%d.xml", newID)
-	masterBytes, err := masterDoc.WriteToBytes()
+	masterBytes, err := writeXMLBytes(masterDoc)
 	if err != nil {
 		return nil, fmt.Errorf("serializing master content: %w", err)
 	}
@@ -139,7 +139,7 @@ func (v *VisioFile) initMastersXML() error {
 	v.mastersXML = masters
 
 	// Serialize and store.
-	mastersBytes, err := mastersDoc.WriteToBytes()
+	mastersBytes, err := writeXMLBytes(mastersDoc)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (v *VisioFile) initMastersXML() error {
 	relationships := relsDoc.CreateElement("Relationships")
 	relationships.CreateAttr("xmlns", "http://schemas.openxmlformats.org/package/2006/relationships")
 
-	relsBytes, err := relsDoc.WriteToBytes()
+	relsBytes, err := writeXMLBytes(relsDoc)
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (v *VisioFile) updateMastersXMLInZip() {
 	doc := etree.NewDocument()
 	doc.CreateProcInst("xml", `version="1.0" encoding="UTF-8" standalone="yes"`)
 	doc.SetRoot(v.mastersXML.Copy())
-	if bytes, err := doc.WriteToBytes(); err == nil {
+	if bytes, err := writeXMLBytes(doc); err == nil {
 		v.ZipFileContents["visio/masters/masters.xml"] = bytes
 	}
 }
@@ -207,7 +207,7 @@ func (v *VisioFile) addMasterRel(relID, target string) {
 	rel.CreateAttr("Type", "http://schemas.microsoft.com/visio/2010/relationships/master")
 	rel.CreateAttr("Target", target)
 
-	if bytes, err := relsDoc.WriteToBytes(); err == nil {
+	if bytes, err := writeXMLBytes(relsDoc); err == nil {
 		v.ZipFileContents[relsPath] = bytes
 	}
 }
@@ -284,7 +284,7 @@ func (v *VisioFile) DuplicateMaster(sourceName, newName string) (*Page, error) {
 	}
 
 	// Copy content from source.
-	sourceBytes, err := source.xml.WriteToBytes()
+	sourceBytes, err := writeXMLBytes(source.xml)
 	if err != nil {
 		return nil, fmt.Errorf("reading source master: %w", err)
 	}
@@ -297,7 +297,7 @@ func (v *VisioFile) DuplicateMaster(sourceName, newName string) (*Page, error) {
 	newMaster.xml = newDoc
 
 	// Update in zip contents.
-	if bytes, err := newDoc.WriteToBytes(); err == nil {
+	if bytes, err := writeXMLBytes(newDoc); err == nil {
 		v.ZipFileContents[newMaster.filename] = bytes
 	}
 
