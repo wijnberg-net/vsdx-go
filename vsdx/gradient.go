@@ -126,20 +126,16 @@ func gradientToSVGDef(g *Gradient, id string, precision int) string {
 	if g.Type == "radial" {
 		svg.WriteString(fmt.Sprintf(`<radialGradient id="%s" cx="50%%" cy="50%%" r="50%%" fx="50%%" fy="50%%">`, id))
 	} else {
-		// Linear gradient - calculate x1,y1,x2,y2 from angle.
-		// Angle 0 = left to right, PI/2 = bottom to top.
-		angleDeg := g.Angle * 180 / math.Pi
-		// SVG gradient angles: 0deg = left to right, 90deg = top to bottom.
-		// Visio: 0 = horizontal L→R, PI/2 = vertical B→T.
-		// We need to transform: SVG_angle = 90 - Visio_angle_deg
-		svgAngle := 90 - angleDeg
-
-		// Convert angle to x1,y1,x2,y2.
-		rad := svgAngle * math.Pi / 180
-		x1 := 50 - 50*math.Cos(rad)
-		y1 := 50 - 50*math.Sin(rad)
-		x2 := 50 + 50*math.Cos(rad)
-		y2 := 50 + 50*math.Sin(rad)
+		// Linear gradient: place start/end on a unit circle around (50%,50%),
+		// then take a SVG-Y-down direction vector matching Visio's angle.
+		// Visio: angle=0 → horizontal L→R, angle=π/2 → vertical bottom→top
+		// (Y-up). In SVG (Y-down) the bottom→top direction has negative Y.
+		c := math.Cos(g.Angle)
+		s := math.Sin(g.Angle)
+		x1 := 50 - 50*c
+		y1 := 50 + 50*s
+		x2 := 50 + 50*c
+		y2 := 50 - 50*s
 
 		svg.WriteString(fmt.Sprintf(`<linearGradient id="%s" x1="%s%%" y1="%s%%" x2="%s%%" y2="%s%%">`,
 			id,

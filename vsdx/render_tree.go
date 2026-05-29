@@ -514,16 +514,14 @@ func (b *RenderTreeBuilder) resolveText(shape *Shape, style *EffectiveStyle, tra
 	// FontSize is in points (72 pt/inch), convert to SVG units
 	fontSizeSVG := (style.FontSize / 72.0) * ((b.scaleX + b.scaleY) / 2)
 
-	// Determine text color - use white for dark fills (only if fill is visible)
+	// Determine text color. Match Visio's SVG export: no UI-style auto
+	// contrast — Visio writes the literal TextColor (or its default of
+	// black) into the export. Users who want readable text on dark fills
+	// must call SetTextColor explicitly; that mirrors how Visio bakes the
+	// chosen color into the shape's Character cell when you change it.
 	textColor := style.TextColor
-	if textColor == "" || textColor == "#000000" {
-		// Only use white text if fill is actually visible (FillPattern != 0)
-		hasFill := style.FillPattern != 0 && style.FillForegnd != "" && style.FillForegnd != "none"
-		if hasFill && isDarkColor(style.FillForegnd) {
-			textColor = "#FFFFFF"
-		} else if textColor == "" {
-			textColor = "#000000"
-		}
+	if textColor == "" {
+		textColor = "#000000"
 	}
 
 	text := &ResolvedText{
