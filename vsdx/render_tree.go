@@ -426,6 +426,23 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 			node.Gradients[gradID] = gradient
 		}
 
+		// Check for gradient stroke (line gradient). Visio class .st20 in
+		// the comprehensive corpus shows stroke="url(#grad-id)" when
+		// LineGradientEnabled=1 and the shape carries a LineGradient
+		// section. We reuse the existing gradient pipeline by converting
+		// the LineGradient struct to a regular Gradient.
+		if lg := shape.LineGradient(); lg != nil && len(lg.Stops) >= 2 && result.Stroke != "none" {
+			sgID := fmt.Sprintf("strokegrad_%s_%d", shape.ID, geomIndex)
+			gradient := &Gradient{
+				Enabled: true,
+				Type:    "linear",
+				Angle:   lg.Angle,
+				Stops:   lg.Stops,
+			}
+			node.Gradients[sgID] = gradient
+			path.Stroke = fmt.Sprintf("url(#%s)", sgID)
+		}
+
 		// Soft-edges blur: Visio's SVG export drops this, but it's a
 		// standard MS-VSDX effect (§2.2.7.3.5) that maps cleanly to an
 		// SVG <feGaussianBlur>. Implementing it makes vsdx-go strictly
