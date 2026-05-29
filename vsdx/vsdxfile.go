@@ -728,17 +728,54 @@ func (v *VisioFile) addPageToAppXML(pageName string) {
 		}
 	}
 
-	// Update TitlesOfParts: add new lpstr element
+	// Update TitlesOfParts: add new lpstr element. Visio's canonical
+	// ordering puts page titles FIRST and master titles at the END. If
+	// the master title (e.g. "Dynamic connector" from ConnectShapes) was
+	// added before this page (because ConnectShapes was called on an
+	// earlier page), inserting at the absolute end interleaves the
+	// master between pages. Instead, find the position of the last
+	// page-title entry and insert immediately after it — before any
+	// master titles.
 	titlesOfParts := root.FindElement("TitlesOfParts")
 	if titlesOfParts != nil {
 		vector := titlesOfParts.FindElement(".//vector")
 		if vector != nil {
-			lpstr := vector.CreateElement("lpstr")
-			lpstr.SetText(pageName)
-			// Increment vector size
+			insertLpstrBeforeMasters(vector, pageName, v)
 			size, _ := strconv.Atoi(vector.SelectAttrValue("size", "0"))
 			vector.CreateAttr("size", strconv.Itoa(size+1))
 		}
+	}
+}
+
+// insertLpstrBeforeMasters inserts a new vt:lpstr entry into the
+// TitlesOfParts vector at the position right after the last page title
+// — i.e. before any master titles. Used by addPageToAppXML so the page
+// list stays contiguous and master entries stay at the tail.
+func insertLpstrBeforeMasters(vector *etree.Element, title string, v *VisioFile) {
+	// Build a set of master shape names (= titles we should insert BEFORE)
+	masterNames := make(map[string]bool)
+	for _, m := range v.MasterPages {
+		if name := m.Name(); name != "" {
+			masterNames[name] = true
+		}
+	}
+
+	existing := vector.SelectElements("vt:lpstr")
+	insertIdx := len(existing) // default: append
+	for i, e := range existing {
+		if masterNames[e.Text()] {
+			insertIdx = i
+			break
+		}
+	}
+
+	lpstr := etree.NewElement("vt:lpstr")
+	lpstr.SetText(title)
+	if insertIdx >= len(existing) {
+		vector.AddChild(lpstr)
+	} else {
+		// Insert before existing[insertIdx]
+		vector.InsertChildAt(existing[insertIdx].Index(), lpstr)
 	}
 }
 
@@ -1001,6 +1038,14 @@ func (v *VisioFile) ensureMasterPages(page *Page, media *Media, connShape *Shape
 		}
 	}
 
+	// Ensure this page's rels file points at the master, regardless of
+	// whether the masters folder was already populated. The if-block above
+	// only fires on the FIRST ConnectShapes call (when hasMasters is
+	// false); subsequent calls on a different page would leave that
+	// page's rels missing. Without it Visio still opens the file but
+	// shows the connector with no master inheritance.
+	v.ensurePageMasterRel(page, "../masters/master1.xml")
+
 	// Update app.xml HeadingPairs and TitlesOfParts for Masters
 	if v.appXML != nil {
 		if v.getAppXMLValue("Masters") == "" {
@@ -1010,6 +1055,47 @@ func (v *VisioFile) ensureMasterPages(page *Page, media *Media, connShape *Shape
 			v.addTitlesOfPartsItem(connShape.ShapeName)
 		}
 	}
+}
+
+// ensurePageMasterRel makes sure the given page has a <Relationship>
+// pointing at the named master XML, creating the page's rels document
+// from scratch if necessary. Idempotent — calling it twice with the
+// same target doesn't duplicate the relationship.
+func (v *VisioFile) ensurePageMasterRel(page *Page, masterTarget string) {
+	const relType = "http://schemas.microsoft.com/visio/2010/relationships/master"
+
+	if page.RelsXML == nil {
+		page.RelsXML = etree.NewDocument()
+		page.RelsXML.CreateProcInst("xml", `version="1.0" encoding="UTF-8" standalone="yes"`)
+		root := page.RelsXML.CreateElement("Relationships")
+		root.CreateAttr("xmlns", "http://schemas.openxmlformats.org/package/2006/relationships")
+	}
+
+	root := page.RelsXML.Root()
+
+	// Already present? bail.
+	for _, rel := range root.SelectElements("Relationship") {
+		if rel.SelectAttrValue("Type", "") == relType &&
+			rel.SelectAttrValue("Target", "") == masterTarget {
+			page.RelsXMLFile = "visio/pages/_rels/" + filepath.Base(page.filename) + ".rels"
+			return
+		}
+	}
+
+	maxID := 0
+	for _, rel := range root.SelectElements("Relationship") {
+		id := rel.SelectAttrValue("Id", "")
+		if strings.HasPrefix(id, "rId") {
+			if n, err := strconv.Atoi(id[3:]); err == nil && n > maxID {
+				maxID = n
+			}
+		}
+	}
+	newRel := root.CreateElement("Relationship")
+	newRel.CreateAttr("Id", fmt.Sprintf("rId%d", maxID+1))
+	newRel.CreateAttr("Type", relType)
+	newRel.CreateAttr("Target", masterTarget)
+	page.RelsXMLFile = "visio/pages/_rels/" + filepath.Base(page.filename) + ".rels"
 }
 
 // addDocumentRel adds a Relationship to document.xml.rels.
@@ -1110,12 +1196,12 @@ func (v *VisioFile) setAppXMLValue(name, value string) {
 		return
 	}
 
-	nameVariant := vector.CreateElement("variant")
-	lpstr := nameVariant.CreateElement("lpstr")
+	nameVariant := vector.CreateElement("vt:variant")
+	lpstr := nameVariant.CreateElement("vt:lpstr")
 	lpstr.SetText(name)
 
-	valueVariant := vector.CreateElement("variant")
-	i4 := valueVariant.CreateElement("i4")
+	valueVariant := vector.CreateElement("vt:variant")
+	i4 := valueVariant.CreateElement("vt:i4")
 	i4.SetText(value)
 
 	// Increment vector size by 2
@@ -1157,7 +1243,7 @@ func (v *VisioFile) addTitlesOfPartsItem(title string) {
 	if vector == nil {
 		return
 	}
-	lpstr := vector.CreateElement("lpstr")
+	lpstr := vector.CreateElement("vt:lpstr")
 	lpstr.SetText(title)
 	size, _ := strconv.Atoi(vector.SelectAttrValue("size", "0"))
 	vector.CreateAttr("size", strconv.Itoa(size+1))
