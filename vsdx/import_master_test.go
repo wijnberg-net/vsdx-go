@@ -418,6 +418,270 @@ func TestImportMaster_NilSourceError(t *testing.T) {
 	}
 }
 
+// --- Test 10: sub-master recursion (composite master imports its base) ---
+
+// TestImportMaster_SubMasterRecursion covers the recurseIntoMasterRefs +
+// rewriteMasterRefs cooperation. Source bundle holds two masters: a
+// standalone "Base" master and a "Composite" master whose internal shape
+// carries Master="<base ID>". Importing Composite alone should pull in
+// Base as well and remap the nested Master attribute.
+func TestImportMaster_SubMasterRecursion(t *testing.T) {
+	source, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+
+	base, err := source.CreateMaster("Base")
+	if err != nil {
+		t.Fatalf("CreateMaster Base: %v", err)
+	}
+	composite, err := source.CreateMaster("Composite")
+	if err != nil {
+		t.Fatalf("CreateMaster Composite: %v", err)
+	}
+	// Point Composite's interior shape at Base via the Master attribute.
+	compShape := composite.ChildShapes()[0]
+	compShape.xml.CreateAttr("Master", base.pageID)
+
+	receiver, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening receiver: %v", err)
+	}
+	t.Cleanup(func() { _ = receiver.Close() })
+
+	beforeCount := len(receiver.MasterPages)
+	newID, err := receiver.ImportMaster(composite)
+	if err != nil {
+		t.Fatalf("ImportMaster: %v", err)
+	}
+	// Both masters should be present (Base via recursion, Composite directly).
+	if got := len(receiver.MasterPages); got != beforeCount+2 {
+		t.Errorf("MasterPages count after recursion = %d, want %d", got, beforeCount+2)
+	}
+	// The composite's nested Master attribute must point at Base's
+	// receiver-side ID. We can't assert "different from source ID" because
+	// blank.vsdx starts with zero masters, so Base — the first to import
+	// via recursion — gets receiver ID "1", which coincidentally equals
+	// its source ID. The robust check is that the attribute resolves to
+	// a receiver master with the expected name.
+	compReceiver := receiver.GetMasterPageByID(newID)
+	if compReceiver == nil {
+		t.Fatal("imported Composite not retrievable")
+	}
+	nestedShape := compReceiver.ChildShapes()[0]
+	nestedMaster := nestedShape.xml.SelectAttrValue("Master", "")
+	if nestedMaster == "" {
+		t.Fatal("nested Master attribute was dropped instead of remapped")
+	}
+	baseReceiver := receiver.GetMasterPageByID(nestedMaster)
+	if baseReceiver == nil {
+		t.Fatalf("nested Master=%q does not resolve to any receiver master", nestedMaster)
+	}
+	if baseReceiver.Name() != "Base" {
+		t.Errorf("nested Master=%q resolves to %q, want %q", nestedMaster, baseReceiver.Name(), "Base")
+	}
+	// Sanity: importing into a non-empty receiver and observing remap
+	// is the same as the above with a guaranteed different numeric range.
+	receiverWithExistingMasters, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening secondary receiver: %v", err)
+	}
+	t.Cleanup(func() { _ = receiverWithExistingMasters.Close() })
+	// Pre-populate with a couple of unrelated masters so getMaxMasterID
+	// returns 2 before our import. Base's receiver ID will then be "3",
+	// which is unambiguously different from source ID "1".
+	if _, err := receiverWithExistingMasters.CreateMaster("Filler1"); err != nil {
+		t.Fatalf("CreateMaster Filler1: %v", err)
+	}
+	if _, err := receiverWithExistingMasters.CreateMaster("Filler2"); err != nil {
+		t.Fatalf("CreateMaster Filler2: %v", err)
+	}
+	newID2, err := receiverWithExistingMasters.ImportMaster(composite)
+	if err != nil {
+		t.Fatalf("secondary ImportMaster: %v", err)
+	}
+	comp2 := receiverWithExistingMasters.GetMasterPageByID(newID2)
+	if comp2 == nil {
+		t.Fatal("secondary import: composite not retrievable")
+	}
+	nested2 := comp2.ChildShapes()[0].xml.SelectAttrValue("Master", "")
+	if nested2 == base.pageID {
+		t.Errorf("nested Master=%q still equals source ID (no remap happened)", nested2)
+	}
+}
+
+// --- Test 11: deep master chain (3 levels) imports without stack issues ---
+
+// TestImportMaster_DeepChain exercises the recursive import path for a
+// chain C → B → A (each Master attribute references the next). All three
+// masters end up in the receiver with their Master attributes remapped
+// onto receiver-side IDs.
+//
+// A "true" cycle test (A → B → A mutually) is intentionally NOT added:
+// vsdx-go's existing Shape construction (newShape → MasterShape →
+// ChildShapes → newShape) recurses through Master attributes for
+// geometry inheritance and stack-overflows on mutual references, which
+// is a pre-existing limitation independent of the import path. importMaster
+// itself short-circuits via masterIDRemap (the receiver-side ID of an
+// already-being-imported master is returned on re-entry), so mutual
+// imports would succeed if the source bundle were itself constructible.
+func TestImportMaster_DeepChain(t *testing.T) {
+	source, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+
+	a, err := source.CreateMaster("DeepA")
+	if err != nil {
+		t.Fatalf("CreateMaster A: %v", err)
+	}
+	b, err := source.CreateMaster("DeepB")
+	if err != nil {
+		t.Fatalf("CreateMaster B: %v", err)
+	}
+	c, err := source.CreateMaster("DeepC")
+	if err != nil {
+		t.Fatalf("CreateMaster C: %v", err)
+	}
+	// C → B → A (no back-edges, no cycle).
+	c.ChildShapes()[0].xml.CreateAttr("Master", b.pageID)
+	b.ChildShapes()[0].xml.CreateAttr("Master", a.pageID)
+
+	receiver, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening receiver: %v", err)
+	}
+	t.Cleanup(func() { _ = receiver.Close() })
+
+	beforeCount := len(receiver.MasterPages)
+	if _, err := receiver.ImportMaster(c); err != nil {
+		t.Fatalf("ImportMaster: %v", err)
+	}
+	if got := len(receiver.MasterPages); got != beforeCount+3 {
+		t.Errorf("MasterPages = %d after deep import, want %d", got, beforeCount+3)
+	}
+	// Verify all three names land in the receiver.
+	for _, want := range []string{"DeepA", "DeepB", "DeepC"} {
+		if receiver.GetMasterPage(want) == nil {
+			t.Errorf("master %q not imported", want)
+		}
+	}
+}
+
+// --- Test 12: Connection / ConnectionABCD sections survive import ---
+
+// TestImportMaster_ConnectionsPreserved verifies that connection points,
+// both T='Connection' and T='ConnectionABCD' rows, survive the deep-copy
+// (and aren't accidentally touched by inlineThemeCells which walks every
+// cell). Per MS-VSDX a Connection row carries X, Y, DirX, DirY, Type,
+// AutoGen, Prompt; an ABCD row carries X, Y, A, B, C, D.
+func TestImportMaster_ConnectionsPreserved(t *testing.T) {
+	stencil := buildStencilWithMaster(t, "WithConnections", func(m *Page, v *VisioFile) {
+		shape := m.ChildShapes()[0]
+		shape.AddConnectionPoint(0.5, 0.0)
+		shape.AddConnectionPoint(0.5, 1.0)
+		shape.AddConnectionABCD(0.0, 0.5, 0, 0, 0)
+	})
+
+	receiver, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening receiver: %v", err)
+	}
+	t.Cleanup(func() { _ = receiver.Close() })
+
+	newID, err := receiver.ImportMaster(stencil)
+	if err != nil {
+		t.Fatalf("ImportMaster: %v", err)
+	}
+	imported := receiver.GetMasterPageByID(newID)
+	shape := imported.ChildShapes()[0]
+	section := shape.xml.FindElement("Section[@N='Connection']")
+	if section == nil {
+		t.Fatal("Connection section missing after import")
+	}
+	var connectionRows, abcdRows int
+	for _, row := range section.SelectElements("Row") {
+		switch row.SelectAttrValue("T", "") {
+		case "Connection":
+			connectionRows++
+			// Sanity: every Connection row should have AutoGen + Prompt
+			// emitted by AddConnectionPoint.
+			if row.FindElement("Cell[@N='AutoGen']") == nil {
+				t.Error("Connection row missing AutoGen cell")
+			}
+			if row.FindElement("Cell[@N='Prompt']") == nil {
+				t.Error("Connection row missing Prompt cell")
+			}
+		case "ConnectionABCD":
+			abcdRows++
+			// ABCD rows carry X/Y/A/B/C/D — none of which should have
+			// been mutated by theme inlining.
+			for _, cellName := range []string{"X", "Y", "A", "B", "C", "D"} {
+				if row.FindElement("Cell[@N='" + cellName + "']") == nil {
+					t.Errorf("ConnectionABCD row missing %s cell", cellName)
+				}
+			}
+		}
+	}
+	if connectionRows != 2 {
+		t.Errorf("Connection rows = %d, want 2", connectionRows)
+	}
+	if abcdRows != 1 {
+		t.Errorf("ConnectionABCD rows = %d, want 1", abcdRows)
+	}
+}
+
+// --- Test 13: theme inlining actually performs theme resolution ---
+
+// TestImportMaster_RealThemeResolution validates that inlineThemeCells
+// doesn't just strip the F attribute and trust whatever V was already
+// there — it must consult EffectiveStyle so a cell that only had a
+// THEMEGUARD formula (no cached V) gets a concrete value written.
+//
+// We construct that case by hand: a Cell element with F='THEMEGUARD(...)'
+// and NO V attribute on the source master. After import with the default
+// InlineTheme=true the cell must carry a V — whatever the EffectiveStyle
+// path resolved to from the source bundle's stylesheet / theme defaults.
+func TestImportMaster_RealThemeResolution(t *testing.T) {
+	stencil := buildStencilWithMaster(t, "BareTheme", func(m *Page, v *VisioFile) {
+		shape := m.ChildShapes()[0]
+		// Insert a Cell with only F, no V, so the F-strip code path
+		// alone would leave V empty. The theme-resolution path must
+		// fill it.
+		cell := shape.xml.CreateElement("Cell")
+		cell.CreateAttr("N", "LineColor")
+		cell.CreateAttr("F", "THEMEGUARD(THEMEVAL())")
+	})
+
+	receiver, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening receiver: %v", err)
+	}
+	t.Cleanup(func() { _ = receiver.Close() })
+
+	newID, err := receiver.ImportMaster(stencil)
+	if err != nil {
+		t.Fatalf("ImportMaster: %v", err)
+	}
+	imported := receiver.GetMasterPageByID(newID)
+	cell := imported.ChildShapes()[0].xml.FindElement("Cell[@N='LineColor']")
+	if cell == nil {
+		t.Fatal("LineColor cell missing from imported master")
+	}
+	if got := cell.SelectAttrValue("F", ""); got != "" {
+		t.Errorf("LineColor F attribute survived inlining: %q", got)
+	}
+	// V must be present (any non-empty value — the actual color depends
+	// on the source bundle's stylesheet / theme defaults). What we're
+	// asserting is that EffectiveStyle resolution kicked in, not just
+	// the F-strip fallback.
+	if got := cell.SelectAttrValue("V", ""); got == "" {
+		t.Error("LineColor V is empty — theme resolution did not run")
+	}
+}
+
 // masterBaseName returns the basename of a master file path (e.g.
 // "visio/masters/master2.xml" → "master2.xml"). Tiny helper to avoid
 // pulling filepath in the test code itself.

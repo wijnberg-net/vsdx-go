@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -208,15 +207,16 @@ func (ctx *importContext) importMaster(srcMaster *Page) (string, error) {
 		}
 	}
 
-	// Reserve a fresh master ID + rId in the receiver.
-	newID := ctx.dst.getMaxMasterID() + 1
-	newIDStr := strconv.Itoa(newID)
-	newRelID := fmt.Sprintf("rId%d", newID)
-	newMasterFile := fmt.Sprintf("visio/masters/master%d.xml", newID)
-	ctx.masterIDRemap[srcID] = newIDStr
-
-	// Recursively import any sub-masters this one depends on. BaseID is the
-	// VSDX way of referencing a base master from this master.
+	// Recurse into sub-masters BEFORE allocating our own ID. Allocating
+	// first would race with nested allocations — each nested call uses
+	// getMaxMasterID() against the receiver's mastersXML and a reservation
+	// that we haven't yet registered would be invisible to that scan,
+	// producing collisions where two masters both claim the same numeric
+	// ID. Allocating after recursion gives each call its own monotonically
+	// increasing ID.
+	//
+	// BaseID is the VSDX way of referencing a base master at the
+	// Master-element level; recurse there first.
 	if base := srcMaster.MasterBaseID; base != "" {
 		if baseMaster := ctx.src.GetMasterPageByID(base); baseMaster != nil {
 			if _, err := ctx.importMaster(baseMaster); err != nil {
@@ -224,11 +224,20 @@ func (ctx *importContext) importMaster(srcMaster *Page) (string, error) {
 			}
 		}
 	}
-	// Recurse into nested MasterShape references inside the source master's
-	// shape tree.
+	// Then recurse into nested Shape Master references inside this
+	// master's shape tree.
 	if err := ctx.recurseIntoMasterRefs(srcMaster); err != nil {
 		return "", err
 	}
+
+	// Now allocate a fresh master ID + rId in the receiver. Both are
+	// monotonic against the receiver state after all nested imports have
+	// landed, so no collision is possible.
+	newID := ctx.dst.getMaxMasterID() + 1
+	newIDStr := strconv.Itoa(newID)
+	newRelID := fmt.Sprintf("rId%d", newID)
+	newMasterFile := fmt.Sprintf("visio/masters/master%d.xml", newID)
+	ctx.masterIDRemap[srcID] = newIDStr
 
 	// Deep-copy the master content document so we can mutate IDs / cells
 	// without touching the source.
@@ -237,9 +246,9 @@ func (ctx *importContext) importMaster(srcMaster *Page) (string, error) {
 		return "", fmt.Errorf("copying master content: %w", err)
 	}
 
-	// Rewrite intra-master references: BaseID, MasterShape attrs, and
-	// (when applicable) cell references that point at the master's own ID.
-	ctx.rewriteMasterRefs(newDoc.Root(), srcID, newIDStr)
+	// Rewrite intra-master references: nested Shape Master attributes that
+	// point at other masters imported earlier in this chain.
+	ctx.rewriteMasterRefs(newDoc.Root())
 
 	// Inline theme cells when requested. Must run on the deep-copied doc
 	// (we resolve against src's theme, write into the new doc).
@@ -382,31 +391,29 @@ func (ctx *importContext) recurseIntoMasterRefs(srcMaster *Page) error {
 }
 
 // rewriteMasterRefs updates the deep-copied master content's intra-bundle
-// references: the master's own ID inside any back-reference, BaseID-style
-// attributes, and the Master attribute on nested shapes that now points
-// to a master imported earlier in the chain.
-func (ctx *importContext) rewriteMasterRefs(root *etree.Element, oldID, newID string) {
+// references: every nested Shape whose Master attribute points at a master
+// in the source bundle gets the attribute remapped to the receiver-side ID
+// (via masterIDRemap, populated earlier by recurseIntoMasterRefs). When
+// the referenced master couldn't be imported (not present in the source),
+// the attribute is dropped so the shape falls back to its own geometry
+// rather than carrying a phantom master ID.
+//
+// MasterShape attributes are left untouched: their scope is shape-IDs
+// inside a target master, and shape IDs survive the import unchanged.
+func (ctx *importContext) rewriteMasterRefs(root *etree.Element) {
 	if root == nil {
 		return
 	}
 	for _, shapeElem := range root.FindElements(".//Shape") {
-		// Rewrite Master attribute via remap table.
-		if attr := shapeElem.SelectAttr("Master"); attr != nil {
-			if remapped, ok := ctx.masterIDRemap[attr.Value]; ok {
-				attr.Value = remapped
-			} else {
-				// Master not imported (couldn't find in source) — drop
-				// the reference so the shape falls back to its own
-				// geometry rather than a phantom master ID.
-				shapeElem.RemoveAttr("Master")
-			}
+		attr := shapeElem.SelectAttr("Master")
+		if attr == nil {
+			continue
 		}
-		// Rewrite MasterShape attribute (sub-shape reference inside a
-		// master inheritance chain). Only meaningful when the parent
-		// shape carries a Master attribute too.
-		if attr := shapeElem.SelectAttr("MasterShape"); attr != nil && shapeElem.SelectAttrValue("Master", "") == "" {
-			shapeElem.RemoveAttr("MasterShape")
+		if remapped, ok := ctx.masterIDRemap[attr.Value]; ok {
+			attr.Value = remapped
+			continue
 		}
+		shapeElem.RemoveAttr("Master")
 	}
 }
 
@@ -660,13 +667,3 @@ func deepCopyDoc(doc *etree.Document) (*etree.Document, error) {
 	return out, nil
 }
 
-// orderedKeys returns the keys of m sorted lexicographically; used in
-// tests / debugging to produce stable iteration over the remap maps.
-func (ctx *importContext) orderedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
