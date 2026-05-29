@@ -83,9 +83,9 @@ func (s *Shape) SetLineGradient(angle float64, stops []GradientStop) {
 		return
 	}
 
-	// Enable gradient
+	// Enable gradient. LineGradientDir=0 (linear) is the default and is
+	// stripped by Visio's resave; omit it here to match canonical form.
 	s.SetCellValue("LineGradientEnabled", "1")
-	s.SetCellValue("LineGradientDir", "0") // Linear
 	s.SetCellFormula("LineGradientAngle", fmtFloat(angle))
 
 	// Remove existing section
@@ -105,13 +105,20 @@ func (s *Shape) SetLineGradient(angle float64, stops []GradientStop) {
 		colorCell.CreateAttr("N", "GradientStopColor")
 		colorCell.CreateAttr("V", stop.Color)
 
-		posCell := row.CreateElement("Cell")
-		posCell.CreateAttr("N", "GradientStopPosition")
-		posCell.CreateAttr("V", fmtFloat(stop.Position))
-
-		transCell := row.CreateElement("Cell")
-		transCell.CreateAttr("N", "GradientStopColorTrans")
-		transCell.CreateAttr("V", fmtFloat(stop.Trans))
+		// Visio's canonical resave omits Position when value is 0
+		// (implicit for the first stop) and ColorTrans when 0.
+		if stop.Position != 0 {
+			transCell := row.CreateElement("Cell")
+			transCell.CreateAttr("N", "GradientStopColorTrans")
+			transCell.CreateAttr("V", fmtFloat(stop.Trans))
+			posCell := row.CreateElement("Cell")
+			posCell.CreateAttr("N", "GradientStopPosition")
+			posCell.CreateAttr("V", fmtFloat(stop.Position))
+		} else if stop.Trans != 0 {
+			transCell := row.CreateElement("Cell")
+			transCell.CreateAttr("N", "GradientStopColorTrans")
+			transCell.CreateAttr("V", fmtFloat(stop.Trans))
+		}
 	}
 }
 

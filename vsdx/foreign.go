@@ -255,6 +255,14 @@ func (p *Page) GroupShapes(shapes []*Shape, padding float64) *Shape {
 	addCellXML(groupElem, CellLocPinX, fmtFloat(width/2), "Width*0.5")
 	addCellXML(groupElem, CellLocPinY, fmtFloat(height/2), "Height*0.5")
 
+	// Canonical Angle/FlipX/FlipY/ResizeMode defaults. Visio's resave
+	// always emits these on every shape — including group containers —
+	// so we match that to avoid spurious diffs on round-trip.
+	addCellWithFormula(groupElem, "Angle", "0", "No Formula", "NUM")
+	addCellWithFormula(groupElem, "FlipX", "0", "No Formula", "")
+	addCellWithFormula(groupElem, "FlipY", "0", "No Formula", "")
+	addCellWithFormula(groupElem, "ResizeMode", "0", "No Formula", "")
+
 	// Invisible border: no line, no fill. ObjType=8 marks it as a group.
 	addCellXML(groupElem, "LinePattern", "0", "")
 	addCellXML(groupElem, "FillPattern", "0", "")

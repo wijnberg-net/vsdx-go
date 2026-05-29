@@ -830,6 +830,21 @@ const (
 // SetLinePattern sets the line pattern and clears any inherited formula.
 // Use LinePatternSolid (1), LinePatternDash (2), LinePatternDot (3), etc.
 func (s *Shape) SetLinePattern(pattern int) {
+	// Visio's canonical resave strips LinePattern when it equals the
+	// stylesheet default (1 = solid). Skip the cell for that value so
+	// fresh shapes don't carry a no-op cell. Callers wanting an explicit
+	// solid-on-top of an inherited dashed pattern should call
+	// SetCellValue(CellLinePattern, "1") directly.
+	if pattern == 1 {
+		// Remove an existing cell so we don't leave a stale value behind.
+		for _, c := range s.xml.SelectElements("Cell") {
+			if c.SelectAttrValue("N", "") == string(CellLinePattern) {
+				s.xml.RemoveChild(c)
+				break
+			}
+		}
+		return
+	}
 	s.SetCellValue(CellLinePattern, strconv.Itoa(pattern))
 	s.clearCellFormula(CellLinePattern)
 }
@@ -844,6 +859,17 @@ const (
 // SetLineCap sets the line cap style and clears any inherited formula.
 // Use LineCapRound (0), LineCapSquare (1), or LineCapExtended (2).
 func (s *Shape) SetLineCap(cap int) {
+	// LineCap=0 (round) is the stylesheet default; Visio's resave
+	// strips it. Match canonical form by not emitting that value.
+	if cap == 0 {
+		for _, c := range s.xml.SelectElements("Cell") {
+			if c.SelectAttrValue("N", "") == string(CellLineCap) {
+				s.xml.RemoveChild(c)
+				break
+			}
+		}
+		return
+	}
 	s.SetCellValue(CellLineCap, strconv.Itoa(cap))
 	s.clearCellFormula(CellLineCap)
 }
@@ -2588,23 +2614,38 @@ func (s *Shape) SetBevelEffect(effect *BevelEffect) {
 	if effect == nil {
 		return
 	}
-	s.SetCellValue(CellBevelTopType, strconv.Itoa(effect.TopType))
-	s.SetCellValue(CellBevelTopWidth, fmtFloat(effect.TopWidth))
-	s.SetCellValue(CellBevelTopHeight, fmtFloat(effect.TopHeight))
-	s.SetCellValue(CellBevelBottomType, strconv.Itoa(effect.BottomType))
-	s.SetCellValue(CellBevelBottomWidth, fmtFloat(effect.BottomWidth))
-	s.SetCellValue(CellBevelBottomHeight, fmtFloat(effect.BottomHeight))
+	// Visio's canonical resave strips bevel cells whose value equals
+	// the default. Mirror that here so a fresh shape doesn't emit
+	// rows of zero-valued cells. SetCellValue is still called for
+	// non-zero values and for cells whose presence (e.g. TopType > 0)
+	// indicates an actively-applied bevel.
+	setNonZeroInt := func(cell CellName, v int) {
+		if v != 0 {
+			s.SetCellValue(cell, strconv.Itoa(v))
+		}
+	}
+	setNonZeroF := func(cell CellName, v float64) {
+		if v != 0 {
+			s.SetCellValue(cell, fmtFloat(v))
+		}
+	}
+	setNonZeroInt(CellBevelTopType, effect.TopType)
+	setNonZeroF(CellBevelTopWidth, effect.TopWidth)
+	setNonZeroF(CellBevelTopHeight, effect.TopHeight)
+	setNonZeroInt(CellBevelBottomType, effect.BottomType)
+	setNonZeroF(CellBevelBottomWidth, effect.BottomWidth)
+	setNonZeroF(CellBevelBottomHeight, effect.BottomHeight)
 	if effect.DepthColor != "" {
 		s.SetCellValue(CellBevelDepthColor, effect.DepthColor)
 	}
-	s.SetCellValue(CellBevelDepthSize, fmtFloat(effect.DepthSize))
+	setNonZeroF(CellBevelDepthSize, effect.DepthSize)
 	if effect.ContourColor != "" {
 		s.SetCellValue(CellBevelContourColor, effect.ContourColor)
 	}
-	s.SetCellValue(CellBevelContourSize, fmtFloat(effect.ContourSize))
-	s.SetCellValue(CellBevelMaterialType, strconv.Itoa(effect.MaterialType))
-	s.SetCellValue(CellBevelLightingType, strconv.Itoa(effect.LightingType))
-	s.SetCellValue(CellBevelLightingAngle, fmtFloat(effect.LightingAngle))
+	setNonZeroF(CellBevelContourSize, effect.ContourSize)
+	setNonZeroInt(CellBevelMaterialType, effect.MaterialType)
+	setNonZeroInt(CellBevelLightingType, effect.LightingType)
+	setNonZeroF(CellBevelLightingAngle, effect.LightingAngle)
 }
 
 // --- Glow Effect Methods (MS-VSDX §2.2.7.3.3) ---
@@ -2658,14 +2699,21 @@ func (s *Shape) ReflectionEffect() *ReflectionEffect {
 }
 
 // SetReflectionEffect sets the reflection effect properties for this shape.
+// Visio's canonical resave strips reflection cells whose value equals 0;
+// mirror that to avoid emitting no-op cells.
 func (s *Shape) SetReflectionEffect(effect *ReflectionEffect) {
 	if effect == nil {
 		return
 	}
-	s.SetCellValue(CellReflectionSize, fmtFloat(effect.Size))
-	s.SetCellValue(CellReflectionTrans, fmtFloat(effect.Trans))
-	s.SetCellValue(CellReflectionDist, fmtFloat(effect.Dist))
-	s.SetCellValue(CellReflectionBlur, fmtFloat(effect.Blur))
+	setNZ := func(cell CellName, v float64) {
+		if v != 0 {
+			s.SetCellValue(cell, fmtFloat(v))
+		}
+	}
+	setNZ(CellReflectionSize, effect.Size)
+	setNZ(CellReflectionTrans, effect.Trans)
+	setNZ(CellReflectionDist, effect.Dist)
+	setNZ(CellReflectionBlur, effect.Blur)
 }
 
 // --- Soft Edges Effect Methods (MS-VSDX §2.2.7.3.5) ---
@@ -2748,19 +2796,30 @@ func (s *Shape) Rotation3DEffect() *Rotation3DEffect {
 }
 
 // SetRotation3DEffect sets the 3D rotation effect properties for this shape.
+// Visio's canonical resave strips 3D-rotation cells whose value equals 0;
+// mirror that to avoid emitting no-op cells. KeepTextFlat is similarly
+// only emitted when true.
 func (s *Shape) SetRotation3DEffect(effect *Rotation3DEffect) {
 	if effect == nil {
 		return
 	}
-	s.SetCellValue(CellRotationXAngle, fmtFloat(effect.XAngle))
-	s.SetCellValue(CellRotationYAngle, fmtFloat(effect.YAngle))
-	s.SetCellValue(CellRotationZAngle, fmtFloat(effect.ZAngle))
-	s.SetCellValue(CellRotationType, strconv.Itoa(effect.RotationType))
-	s.SetCellValue(CellPerspective, fmtFloat(effect.Perspective))
-	s.SetCellValue(CellDistanceFromGround, fmtFloat(effect.DistanceFromGround))
+	setNZF := func(cell CellName, v float64) {
+		if v != 0 {
+			s.SetCellValue(cell, fmtFloat(v))
+		}
+	}
+	setNZI := func(cell CellName, v int) {
+		if v != 0 {
+			s.SetCellValue(cell, strconv.Itoa(v))
+		}
+	}
+	setNZF(CellRotationXAngle, effect.XAngle)
+	setNZF(CellRotationYAngle, effect.YAngle)
+	setNZF(CellRotationZAngle, effect.ZAngle)
+	setNZI(CellRotationType, effect.RotationType)
+	setNZF(CellPerspective, effect.Perspective)
+	setNZF(CellDistanceFromGround, effect.DistanceFromGround)
 	if effect.KeepTextFlat {
 		s.SetCellValue(CellKeepTextFlat, "1")
-	} else {
-		s.SetCellValue(CellKeepTextFlat, "0")
 	}
 }

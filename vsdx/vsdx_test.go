@@ -3757,8 +3757,11 @@ func TestBeginArrowAndLineCap(t *testing.T) {
 	if conn.CellValue(CellEndArrow) != "13" {
 		t.Errorf("EndArrow = %q, want '13'", conn.CellValue(CellEndArrow))
 	}
-	if conn.CellValue(CellLineCap) != "0" {
-		t.Errorf("LineCap = %q, want '0'", conn.CellValue(CellLineCap))
+	// LineCap=0 (round) is the stylesheet default; SetLineCap(LineCapRound)
+	// is a no-op canonicalized to "no explicit cell" so the cell stays
+	// absent. Match Visio's resave behaviour.
+	if conn.CellValue(CellLineCap) != "" {
+		t.Errorf("LineCap = %q, want empty (default = round)", conn.CellValue(CellLineCap))
 	}
 }
 
@@ -3958,8 +3961,10 @@ func TestNetworkFeaturesRoundTrip(t *testing.T) {
 	if connV2.CellValue(CellBeginArrow) != "13" {
 		t.Errorf("BeginArrow after reopen = %q, want '13'", connV2.CellValue(CellBeginArrow))
 	}
-	if connV2.CellValue(CellLineCap) != "0" {
-		t.Errorf("LineCap after reopen = %q, want '0'", connV2.CellValue(CellLineCap))
+	// LineCap=0 is the stylesheet default; the writer doesn't emit a
+	// no-op cell so the value stays absent (inheriting default = round).
+	if connV2.CellValue(CellLineCap) != "" {
+		t.Errorf("LineCap after reopen = %q, want empty (default = round)", connV2.CellValue(CellLineCap))
 	}
 }
 

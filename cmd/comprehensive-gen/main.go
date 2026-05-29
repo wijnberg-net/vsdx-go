@@ -927,7 +927,9 @@ func buildEffectsPage(v *vsdx.VisioFile) {
 
 	s = _baseShape(p, gx(2, 1, cellW, cellH, mx, mt), "effect-reflection-default")
 	s.SetFillColor("#cfe2ff")
-	s.SetReflectionEffect(&vsdx.ReflectionEffect{Size: 50, Trans: 0.5, Dist: 0, Blur: 4})
+	// ReflectionSize=50 is Visio's default and gets stripped on resave;
+	// pick a non-default value so the cell survives a round trip.
+	s.SetReflectionEffect(&vsdx.ReflectionEffect{Size: 30, Trans: 0.5, Dist: 0, Blur: 4})
 
 	s = _baseShape(p, gx(3, 1, cellW, cellH, mx, mt), "effect-3d-rotation")
 	s.SetFillColor("#cfe2ff")
