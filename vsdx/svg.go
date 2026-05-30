@@ -2,6 +2,7 @@ package vsdx
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os/exec"
@@ -667,6 +668,33 @@ func (s *Shape) ForeignImageData() *ForeignImage {
 	}
 }
 
+// DataURI returns the embedded image as an RFC 2397 data URI suitable for an
+// SVG <image href="...">. The bool is false when the image type cannot be
+// embedded directly into the href — that is the case for vector metafiles
+// (EMF/WMF), which must first be converted via ConvertEMFToSVG by the caller.
+func (fi *ForeignImage) DataURI() (string, bool) {
+	if fi == nil || len(fi.Data) == 0 {
+		return "", false
+	}
+	var mime string
+	switch strings.ToLower(fi.Extension) {
+	case "png":
+		mime = "image/png"
+	case "jpeg", "jpg":
+		mime = "image/jpeg"
+	case "gif":
+		mime = "image/gif"
+	case "bmp":
+		mime = "image/bmp"
+	case "svg":
+		mime = "image/svg+xml"
+	default:
+		// EMF/WMF and anything unrecognised: not directly embeddable.
+		return "", false
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(fi.Data), true
+}
+
 // resolveMediaPath resolves a relative target path against the page's directory.
 // e.g., page="visio/masters/master1.xml", target="../media/image1.emf" → "visio/media/image1.emf"
 func resolveMediaPath(pagePath, target string) string {
@@ -784,7 +812,12 @@ func MasterToSVG(master *Page, opts ...SVGOption) (*SVGResult, error) {
 		return &SVGResult{SVG: img.Data, BrandColor: detectSVGBrandColor(string(img.Data))}, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported foreign image type %q for %q (need EMF or SVG)", img.Extension, master.Name())
+		// Raster bitmaps (PNG/JPEG/BMP/GIF): the render tree now emits these
+		// as an <image> with a base64 data URI, so render the shape through
+		// the standard pipeline instead of failing. This keeps stencil-master
+		// previews working for bitmap-based stencils (e.g. Azure/AWS icon
+		// sets), not just EMF Cisco stencils.
+		return ShapeToSVG(shape, opts...)
 	}
 }
 

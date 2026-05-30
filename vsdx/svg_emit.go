@@ -589,6 +589,13 @@ func (e *SVGEmitter) emitGeometry(svg *strings.Builder, node *RenderNode) {
 		return
 	}
 
+	// A Foreign embedded image (device icon, photo, …) forms the backdrop of
+	// the shape. Emit it before children and geometry so any border or label
+	// draws on top of it, matching Visio's z-order for Foreign shapes.
+	if node.Image != nil {
+		e.emitImage(svg, node.Image)
+	}
+
 	// Collect valid paths for this node
 	var validPaths []*ResolvedPath
 	for _, path := range node.Geometry {
@@ -753,6 +760,19 @@ func (e *SVGEmitter) emitSinglePath(svg *strings.Builder, path *ResolvedPath) {
 	}
 
 	svg.WriteString(fmt.Sprintf(`  <path d="%s" %s/>`, path.D, strings.Join(attrs, " ")))
+	svg.WriteByte('\n')
+}
+
+// emitImage emits an <image> element for a Foreign shape's embedded image.
+// The href carries a base64 data URI so the SVG is self-contained (no external
+// fetches). preserveAspectRatio="none" stretches the image to the shape box,
+// matching how Visio sizes Foreign images to ImgWidth × ImgHeight.
+func (e *SVGEmitter) emitImage(svg *strings.Builder, im *RenderImage) {
+	if im == nil || im.DataURI == "" {
+		return
+	}
+	svg.WriteString(fmt.Sprintf(`  <image x="%s" y="%s" width="%s" height="%s" preserveAspectRatio="none" href="%s"/>`,
+		e.fmtNum(im.X), e.fmtNum(im.Y), e.fmtNum(im.Width), e.fmtNum(im.Height), im.DataURI))
 	svg.WriteByte('\n')
 }
 

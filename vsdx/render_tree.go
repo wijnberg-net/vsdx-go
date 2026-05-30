@@ -1,6 +1,7 @@
 package vsdx
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
 	"sort"
@@ -15,6 +16,7 @@ type RenderNode struct {
 	Transform *ShapeTransform
 	Geometry  []*ResolvedPath
 	Text      *ResolvedText
+	Image     *RenderImage // embedded Foreign image (PNG/JPEG/SVG/EMF), nil if none
 	Children  []*RenderNode
 	ZOrder    int
 	Visible   bool
@@ -31,6 +33,17 @@ type RenderNode struct {
 	Shadows map[string]*Shadow
 	// Fill pattern definitions needed by this node (hatching patterns 2-24)
 	FillPatterns map[string]*FillPatternDef
+}
+
+// RenderImage carries a resolved embedded Foreign image (a device icon, photo,
+// etc.) positioned in output SVG coordinates and ready for emission as an
+// <image> element. All fields are final — the emitter performs no further
+// computation.
+type RenderImage struct {
+	DataURI string  // "data:image/png;base64,…" — ready for the href attribute
+	X, Y    float64 // top-left corner in output SVG coordinates (Y-down)
+	Width   float64 // rendered width in output SVG units
+	Height  float64 // rendered height in output SVG units
 }
 
 // FillPatternDef contains a fill pattern definition for hatching.
@@ -212,6 +225,7 @@ func (b *RenderTreeBuilder) buildNodeWithOffset(shape *Shape, zOrder int, parent
 	// Resolve geometry for visible shapes
 	if node.Visible {
 		node.Geometry = b.resolveAllGeometryWithOffset(shape, node.Style, parentW, parentH, offsetX, offsetY, node)
+		node.Image = b.resolveForeignImage(shape, offsetX, offsetY)
 	}
 
 	// Resolve text for shapes with geometry, OR for group shapes that have
@@ -474,6 +488,67 @@ func (b *RenderTreeBuilder) resolveAllGeometryWithOffset(shape *Shape, style *Ef
 	}
 
 	return paths
+}
+
+// resolveForeignImage builds the positioned <image> data for a Foreign shape's
+// embedded bitmap/vector image. Returns nil when the shape carries no embedded
+// image or when the image type cannot be rendered (e.g. an EMF when
+// emf2svg-conv is not installed) — in that case the caller falls back to the
+// shape's geometry, preserving the previous behaviour.
+//
+// Note: image FlipX/FlipY mirroring is not yet applied; embedded device icons
+// in the wild are not flipped. The placement honours ImgOffsetX/Y and
+// ImgWidth/Height, defaulting to filling the shape box (Visio's default for
+// SetForeignData shapes).
+func (b *RenderTreeBuilder) resolveForeignImage(shape *Shape, offsetX, offsetY float64) *RenderImage {
+	if shape.ShapeType != "Foreign" {
+		return nil
+	}
+	img := shape.ForeignImageData()
+	if img == nil {
+		return nil
+	}
+
+	uri, ok := img.DataURI()
+	if !ok {
+		// Vector metafiles: convert to SVG and embed the result. Guarded so a
+		// missing emf2svg-conv (or a conversion error) degrades to geometry.
+		switch strings.ToLower(img.Extension) {
+		case "emf", "wmf":
+			svgBytes, err := ConvertEMFToSVG(img.Data)
+			if err != nil || len(svgBytes) == 0 {
+				return nil
+			}
+			uri = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(svgBytes)
+		default:
+			return nil
+		}
+	}
+
+	// Image box in the shape's local (Y-up) frame. ImgWidth/Height and
+	// ImgOffsetX/Y are in inches; default to filling the shape box.
+	shapeW := math.Abs(shape.Width())
+	shapeH := math.Abs(shape.Height())
+	imgW := img.Width
+	imgH := img.Height
+	if imgW <= 0 {
+		imgW = shapeW
+	}
+	if imgH <= 0 {
+		imgH = shapeH
+	}
+	imgOffX := toFloat(shape.CellValue("ImgOffsetX"))
+	imgOffY := toFloat(shape.CellValue("ImgOffsetY"))
+
+	// Map to output SVG coords. X accumulates the group offset; Y is flipped
+	// using the root height (same convention the geometry resolver uses). The
+	// image's TOP edge in Visio coords is (offsetY + imgOffY + imgH).
+	x := (offsetX + imgOffX) * b.scaleX
+	y := (b.rootH - (offsetY + imgOffY + imgH)) * b.scaleY
+	w := imgW * b.scaleX
+	h := imgH * b.scaleY
+
+	return &RenderImage{DataURI: uri, X: x, Y: y, Width: w, Height: h}
 }
 
 func extractMarkerID(url string) string {
