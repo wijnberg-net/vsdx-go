@@ -42,7 +42,24 @@ type VisioFile struct {
 	mastersXML      *etree.Element  // root element of masters.xml
 	masterIndex     map[string]*Page
 	cachedMedia     *Media
+
+	// shapeResolveDepth guards (*Shape) construction against pathological
+	// cyclic master inheritance. newShape inherits master geometry when the
+	// instance has none of its own; that triggers MasterShape → ChildShapes
+	// → newShape on the target master, which can recurse forever if two
+	// masters reference each other via the Master attribute. The counter
+	// is incremented on entry to the inheritance block and decremented on
+	// exit; when it crosses shapeResolveDepthLimit we skip the inheritance
+	// instead of recursing further. Not concurrent-safe by design — vsdx-go
+	// itself isn't concurrent.
+	shapeResolveDepth int
 }
+
+// shapeResolveDepthLimit caps cyclic master-inheritance recursion in
+// newShape. A legitimate VSDX master chain rarely exceeds 5-10 levels;
+// 64 is comfortably above that while still catching cycles within a
+// handful of bounces.
+const shapeResolveDepthLimit = 64
 
 // IsStencil returns true if this file is a stencil (.vssx/.vssm) with master shapes but no pages.
 func (v *VisioFile) IsStencil() bool {

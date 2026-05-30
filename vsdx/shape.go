@@ -132,7 +132,23 @@ func newShape(xml *etree.Element, parent ShapeParent, page *Page) *Shape {
 	// instance-owned Geometry wrappers that initially reference master XML
 	// for reads but localize to a deep-copy on first mutation via
 	// (*Geometry).localize(). See master_isolation_test.go for the regression.
-	if len(s.Geometries) == 0 {
+	//
+	// Depth guard: MasterShape() reaches into masterPage.ChildShapes() which
+	// re-enters newShape. If two masters reference each other via the Master
+	// attribute (A.Master=B, B.Master=A — malformed but legal XML), this
+	// loop runs forever and the goroutine stack-overflows. The counter on
+	// the parent VisioFile bounds the recursion to shapeResolveDepthLimit
+	// levels; beyond that we skip the master-geometry inheritance entirely
+	// rather than blow up. Legitimate inheritance chains never come close.
+	var visForDepth *VisioFile
+	if page != nil {
+		visForDepth = page.vis
+	}
+	if len(s.Geometries) == 0 && (visForDepth == nil || visForDepth.shapeResolveDepth < shapeResolveDepthLimit) {
+		if visForDepth != nil {
+			visForDepth.shapeResolveDepth++
+			defer func() { visForDepth.shapeResolveDepth-- }()
+		}
 		if ms := s.MasterShape(); ms != nil && len(ms.Geometries) > 0 {
 			for _, mg := range ms.Geometries {
 				ig := &Geometry{

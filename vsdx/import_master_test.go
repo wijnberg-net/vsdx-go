@@ -518,14 +518,10 @@ func TestImportMaster_SubMasterRecursion(t *testing.T) {
 // masters end up in the receiver with their Master attributes remapped
 // onto receiver-side IDs.
 //
-// A "true" cycle test (A → B → A mutually) is intentionally NOT added:
-// vsdx-go's existing Shape construction (newShape → MasterShape →
-// ChildShapes → newShape) recurses through Master attributes for
-// geometry inheritance and stack-overflows on mutual references, which
-// is a pre-existing limitation independent of the import path. importMaster
-// itself short-circuits via masterIDRemap (the receiver-side ID of an
-// already-being-imported master is returned on re-entry), so mutual
-// imports would succeed if the source bundle were itself constructible.
+// True cycles (mutual A ↔ B references) are covered separately by
+// TestImportMaster_MutualMasterRefSurvives, which relies on the depth
+// guard in newShape (master_cycle_test.go) for the source-side shape
+// construction to bottom out.
 func TestImportMaster_DeepChain(t *testing.T) {
 	source, err := Open("../tests/blank.vsdx")
 	if err != nil {
@@ -679,6 +675,53 @@ func TestImportMaster_RealThemeResolution(t *testing.T) {
 	// the F-strip fallback.
 	if got := cell.SelectAttrValue("V", ""); got == "" {
 		t.Error("LineColor V is empty — theme resolution did not run")
+	}
+}
+
+// --- Test 14: mutual master references produce a clean cycle error ---
+
+// TestImportMaster_MutualMasterRefRejectedAsCycle confirms that the
+// import path handles mutual master references (A.Master=B and
+// B.Master=A in the source) by returning a clean cycle error rather
+// than hanging or stack-overflowing. This combines two defences:
+//   - newShape's depth guard (master_cycle_test.go) prevents the
+//     source-side AllShapes() call from blowing the stack during
+//     recurseIntoMasterRefs's XML walk
+//   - importMaster's importingNow set detects the second entry into
+//     the same source master ID and returns an error rather than
+//     short-circuiting (which would happen if masterIDRemap had been
+//     pre-populated — which it isn't, since the post-audit refactor
+//     allocates IDs only AFTER recursion completes)
+//
+// The error must mention "cycle" so callers can switch on it.
+func TestImportMaster_MutualMasterRefRejectedAsCycle(t *testing.T) {
+	source, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	a, err := source.CreateMaster("MutualA")
+	if err != nil {
+		t.Fatalf("CreateMaster A: %v", err)
+	}
+	b, err := source.CreateMaster("MutualB")
+	if err != nil {
+		t.Fatalf("CreateMaster B: %v", err)
+	}
+	a.ChildShapes()[0].xml.CreateAttr("Master", b.pageID)
+	b.ChildShapes()[0].xml.CreateAttr("Master", a.pageID)
+
+	receiver, err := Open("../tests/blank.vsdx")
+	if err != nil {
+		t.Fatalf("opening receiver: %v", err)
+	}
+	t.Cleanup(func() { _ = receiver.Close() })
+	_, err = receiver.ImportMaster(a)
+	if err == nil {
+		t.Fatal("expected cycle error, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error %q does not mention cycle", err.Error())
 	}
 }
 
