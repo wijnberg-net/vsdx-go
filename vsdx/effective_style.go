@@ -9,24 +9,24 @@ import (
 // Resolution order: local cell → master shape → style sheet → theme/QuickStyle → defaults.
 type EffectiveStyle struct {
 	// Line properties
-	LineColor     string  // Resolved RGB color
-	LineWeight    float64 // Points
-	LinePattern   int     // 0=none, 1=solid, 2-24=patterns
-	LineCap       int     // 0=round, 1=square, 2=extended
+	LineColor      string  // Resolved RGB color
+	LineWeight     float64 // Points
+	LinePattern    int     // 0=none, 1=solid, 2-24=patterns
+	LineCap        int     // 0=round, 1=square, 2=extended
 	LineColorTrans float64 // Transparency 0-1
 
 	// Arrow properties
-	BeginArrow     int     // Arrow type index (0=none, 1-45=types)
-	EndArrow       int     // Arrow type index
-	BeginArrowSize int     // Size index (0-6)
-	EndArrowSize   int     // Size index
+	BeginArrow        int     // Arrow type index (0=none, 1-45=types)
+	EndArrow          int     // Arrow type index
+	BeginArrowSize    int     // Size index (0-6)
+	EndArrowSize      int     // Size index
 	BeginArrowSetback float64 // Path shortening in points
 	EndArrowSetback   float64 // Path shortening in points
 
 	// Fill properties
-	FillForegnd     string  // Foreground fill color
-	FillBkgnd       string  // Background fill color
-	FillPattern     int     // Fill pattern (0=none, 1=solid, 2-24=patterns)
+	FillForegnd      string  // Foreground fill color
+	FillBkgnd        string  // Background fill color
+	FillPattern      int     // Fill pattern (0=none, 1=solid, 2-24=patterns)
 	FillForegndTrans float64 // Foreground transparency 0-1
 	FillBkgndTrans   float64 // Background transparency 0-1
 
@@ -34,12 +34,12 @@ type EffectiveStyle struct {
 	Rounding float64 // Corner rounding radius in inches
 
 	// Shadow properties
-	ShdwForegnd       string  // Shadow color
-	ShdwForegndTrans  float64 // Shadow transparency
-	ShapeShdwType     int     // Shadow type (0=none, 1=simple, 2=oblique)
-	ShapeShdwOffsetX  float64 // X offset in points
-	ShapeShdwOffsetY  float64 // Y offset in points
-	ShapeShdwBlur     float64 // Blur radius in points
+	ShdwForegnd          string  // Shadow color
+	ShdwForegndTrans     float64 // Shadow transparency
+	ShapeShdwType        int     // Shadow type (0=none, 1=simple, 2=oblique)
+	ShapeShdwOffsetX     float64 // X offset in points
+	ShapeShdwOffsetY     float64 // Y offset in points
+	ShapeShdwBlur        float64 // Blur radius in points
 	ShapeShdwScaleFactor float64 // Scale factor
 
 	// Soft Edges (MS-VSDX §2.2.7.3.5): renders as a Gaussian blur applied
@@ -49,19 +49,19 @@ type EffectiveStyle struct {
 	SoftEdgesSize float64 // Soft-edge radius in points
 
 	// Text properties
-	TextColor     string  // Text color
-	FontSize          float64 // Font size in points
-	FontID            int     // Font table index (when Char.Font is numeric)
-	FontName          string  // Font name (when Char.Font is set to a literal name)
-	Bold              bool
-	Italic            bool
-	Underline         bool
-	Strikethrough     bool
+	TextColor           string  // Text color
+	FontSize            float64 // Font size in points
+	FontID              int     // Font table index (when Char.Font is numeric)
+	FontName            string  // Font name (when Char.Font is set to a literal name)
+	Bold                bool
+	Italic              bool
+	Underline           bool
+	Strikethrough       bool
 	DoubleStrikethrough bool
-	SmallCaps         bool
-	Overline          bool
-	TextPos           int     // 0=normal, 1=superscript, 2=subscript
-	TextAlign         int     // 0=left, 1=center, 2=right
+	SmallCaps           bool
+	Overline            bool
+	TextPos             int // 0=normal, 1=superscript, 2=subscript
+	TextAlign           int // 0=left, 1=center, 2=right
 
 	// Geometry visibility
 	NoLine bool // Hide line
@@ -79,20 +79,20 @@ type EffectiveStyle struct {
 func (s *Shape) ComputeEffectiveStyle() *EffectiveStyle {
 	es := &EffectiveStyle{
 		// Defaults per MS-VSDX §2.2.5.3.3.1
-		LineColor:     "#000000",
-		LineWeight:    0.01, // 0.01 inches = 0.72 pts
-		LinePattern:   1,    // Solid
-		LineCap:       0,    // Round
-		BeginArrowSize: 2,   // Default medium
-		EndArrowSize:  2,
-		FillForegnd:   "#FFFFFF",
-		FillBkgnd:     "#FFFFFF",
-		FillPattern:   1, // Solid
-		ShdwForegnd:   "#808080",
+		LineColor:            "#000000",
+		LineWeight:           0.01, // 0.01 inches = 0.72 pts
+		LinePattern:          1,    // Solid
+		LineCap:              0,    // Round
+		BeginArrowSize:       2,    // Default medium
+		EndArrowSize:         2,
+		FillForegnd:          "#FFFFFF",
+		FillBkgnd:            "#FFFFFF",
+		FillPattern:          1, // Solid
+		ShdwForegnd:          "#808080",
 		ShapeShdwScaleFactor: 1.0,
-		TextColor:     "#000000",
-		FontSize:      12,
-		TextAlign:     0,
+		TextColor:            "#000000",
+		FontSize:             12,
+		TextAlign:            0,
 	}
 
 	// Resolve each property through the inheritance chain
@@ -270,13 +270,13 @@ func (es *EffectiveStyle) resolveShadowProperties(s *Shape) {
 					es.ShapeShdwBlur = blur
 				}
 				// Color: theme outerShdw uses phClr (placeholder, resolved per
-			// shape). Visio's behaviour is to tint the shadow with the shape's
-			// fill color rather than render opaque black. We mirror that.
-			// (Resolving the proper QuickStyleEffectsMatrix → varColor chain
-			// is left for a later pass; the fill is close enough at 22% alpha.)
-			if es.FillForegnd != "" && es.FillForegnd != "#FFFFFF" {
-				es.ShdwForegnd = es.FillForegnd
-			}
+				// shape). Visio's behaviour is to tint the shadow with the shape's
+				// fill color rather than render opaque black. We mirror that.
+				// (Resolving the proper QuickStyleEffectsMatrix → varColor chain
+				// is left for a later pass; the fill is close enough at 22% alpha.)
+				if es.FillForegnd != "" && es.FillForegnd != "#FFFFFF" {
+					es.ShdwForegnd = es.FillForegnd
+				}
 				// Theme alpha was parsed into ShadowTransparency (0..1).
 				if effects := s.themeEffects(); effects != nil && effects.ShadowTransparency > 0 {
 					es.ShdwForegndTrans = effects.ShadowTransparency

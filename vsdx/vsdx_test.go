@@ -1022,7 +1022,6 @@ func TestGetShapeColors(t *testing.T) {
 
 // --- Master shapes ---
 
-
 // --- Save/Load round-trip ---
 
 func TestSaveAndReopen(t *testing.T) {
@@ -3573,10 +3572,10 @@ func TestAddConnectionPoint(t *testing.T) {
 	w, h := s.Width(), s.Height()
 
 	// Add 4 connection points at edges
-	s.AddConnectionPoint(w/2, 0)     // bottom
-	s.AddConnectionPoint(w/2, h)     // top
-	s.AddConnectionPoint(0, h/2)     // left
-	s.AddConnectionPoint(w, h/2)     // right
+	s.AddConnectionPoint(w/2, 0) // bottom
+	s.AddConnectionPoint(w/2, h) // top
+	s.AddConnectionPoint(0, h/2) // left
+	s.AddConnectionPoint(w, h/2) // right
 
 	section := s.XML().FindElement("Section[@N='Connection']")
 	if section == nil {
@@ -3611,8 +3610,8 @@ func TestAddLayerAndSetMember(t *testing.T) {
 	}
 
 	// Assign shapes to layers
-	shapes[0].SetLayerMember("0")     // router on L3
-	shapes[2].SetLayerMember("0;1")   // switch on L3 + L2
+	shapes[0].SetLayerMember("0")   // router on L3
+	shapes[2].SetLayerMember("0;1") // switch on L3 + L2
 
 	if shapes[0].CellValue(CellLayerMember) != "0" {
 		t.Error("router layer should be '0'")
@@ -5246,7 +5245,7 @@ func TestGeometrySortedRowsNumeric(t *testing.T) {
 
 	// Add rows in non-sequential order to simulate inherited geometry
 	// with double-digit indices
-	geom.AddMoveTo(0, 0)                  // IX=1
+	geom.AddMoveTo(0, 0) // IX=1
 	for i := 0; i < 11; i++ {
 		geom.AddLineTo(float64(i+1)*0.1, float64(i+1)*0.1) // IX=2..12
 	}
@@ -6590,12 +6589,12 @@ func TestBackgroundPage(t *testing.T) {
 	defer vis.Close()
 
 	page := vis.Pages[0]
-	
+
 	// Most pages don't have a background
 	bg := page.BackgroundPage()
 	// Just verify it doesn't crash
 	_ = bg
-	
+
 	// Check IsBackgroundPage (should be false for regular page)
 	if page.IsBackgroundPage() {
 		// Could be true if the test file has background pages
@@ -7218,7 +7217,6 @@ func TestTheCelReference(t *testing.T) {
 }
 
 // --- Theme Variant Tests ---
-
 
 // TestFormulaNewMSVSDXFunctions tests newly implemented MS-VSDX spec functions.
 func TestFormulaNewMSVSDXFunctions(t *testing.T) {

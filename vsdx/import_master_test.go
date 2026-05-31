@@ -615,7 +615,7 @@ func TestImportMaster_ConnectionsPreserved(t *testing.T) {
 			// ABCD rows carry X/Y/A/B/C/D — none of which should have
 			// been mutated by theme inlining.
 			for _, cellName := range []string{"X", "Y", "A", "B", "C", "D"} {
-				if row.FindElement("Cell[@N='" + cellName + "']") == nil {
+				if row.FindElement("Cell[@N='"+cellName+"']") == nil {
 					t.Errorf("ConnectionABCD row missing %s cell", cellName)
 				}
 			}

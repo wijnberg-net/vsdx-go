@@ -619,13 +619,13 @@ func TestLinePatternToSVG(t *testing.T) {
 		weight  float64
 		want    string
 	}{
-		{0, 1, ""},                    // None
-		{1, 1, ""},                    // Solid
-		{2, 1, "7.00 5.00"},           // Dash
-		{3, 1, "0 5.00"},              // Dot (round caps + zero-length dash)
-		{4, 1, "7.00 5.00 0 5.00"},    // Dash-Dot
-		{10, 1, "0 3.00"},             // Sparse Dot
-		{11, 1, "0 2.00"},             // Dense Dot
+		{0, 1, ""},                 // None
+		{1, 1, ""},                 // Solid
+		{2, 1, "7.00 5.00"},        // Dash
+		{3, 1, "0 5.00"},           // Dot (round caps + zero-length dash)
+		{4, 1, "7.00 5.00 0 5.00"}, // Dash-Dot
+		{10, 1, "0 3.00"},          // Sparse Dot
+		{11, 1, "0 2.00"},          // Dense Dot
 	}
 
 	for _, tt := range tests {

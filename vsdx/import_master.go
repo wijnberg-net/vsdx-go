@@ -140,12 +140,12 @@ func readCellFloat(shape *etree.Element, cellName string) float64 {
 // invocation. Tracks the source-to-receiver master-ID remap and media
 // rename map for cycle detection and rel-target rewriting.
 type importContext struct {
-	dst              *VisioFile
-	src              *VisioFile
-	opts             ImportOptions
-	masterIDRemap    map[string]string // src master ID → dst master ID
-	mediaRemap       map[string]string // src media path → dst media path
-	importingNow     map[string]bool   // src master ID → in-progress (cycle guard)
+	dst           *VisioFile
+	src           *VisioFile
+	opts          ImportOptions
+	masterIDRemap map[string]string // src master ID → dst master ID
+	mediaRemap    map[string]string // src media path → dst media path
+	importingNow  map[string]bool   // src master ID → in-progress (cycle guard)
 }
 
 func newImportContext(dst, src *VisioFile, opts ImportOptions) *importContext {
@@ -567,8 +567,8 @@ func (ctx *importContext) copyMasterRels(srcMaster *Page, newMasterID int) ([]by
 // visio/masters/_rels/) and returns the absolute zip path of the
 // referenced media file.
 func resolveMasterRelTarget(masterFile, target string) string {
-	dir := filepath.Dir(masterFile)            // visio/masters
-	resolved := filepath.Join(dir, target)     // visio/masters/../media/imageN.png
+	dir := filepath.Dir(masterFile)        // visio/masters
+	resolved := filepath.Join(dir, target) // visio/masters/../media/imageN.png
 	return filepath.ToSlash(filepath.Clean(resolved))
 }
 
@@ -587,8 +587,8 @@ func (ctx *importContext) allocateMediaPath(srcPath string) string {
 		return candidate
 	}
 	// Collision: parse imageN.ext, bump N until free.
-	ext := filepath.Ext(base)               // ".png"
-	stem := strings.TrimSuffix(base, ext)   // "image3"
+	ext := filepath.Ext(base)             // ".png"
+	stem := strings.TrimSuffix(base, ext) // "image3"
 	prefix := stem
 	for i := len(stem); i > 0; i-- {
 		if stem[i-1] < '0' || stem[i-1] > '9' {
@@ -666,4 +666,3 @@ func deepCopyDoc(doc *etree.Document) (*etree.Document, error) {
 	}
 	return out, nil
 }
-

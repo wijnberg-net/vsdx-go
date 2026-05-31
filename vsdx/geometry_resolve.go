@@ -375,7 +375,7 @@ func (r *GeometryResolver) buildPathData() string {
 			aspectRatio := r.cellFloat(row, "D")
 
 			startX := (prevX/r.scaleX - r.offsetX)
-			startY := r.parentH - (prevY/r.scaleY) - r.offsetY
+			startY := r.parentH - (prevY / r.scaleY) - r.offsetY
 
 			arcSVG := r.ellipticalArcToSVG(startX, startY, cpX-r.offsetX, cpY-r.offsetY, ex, ey,
 				aspectRatio, rotAngleDeg)
@@ -399,7 +399,7 @@ func (r *GeometryResolver) buildPathData() string {
 			cpY := cpRY*r.localH + r.offsetY
 
 			startX := (prevX/r.scaleX - r.offsetX)
-			startY := r.parentH - (prevY/r.scaleY) - r.offsetY
+			startY := r.parentH - (prevY / r.scaleY) - r.offsetY
 
 			arcSVG := r.ellipticalArcToSVG(startX, startY, cpX-r.offsetX, cpY-r.offsetY,
 				absX-r.offsetX, absY-r.offsetY, aspectRatio, rotAngleDeg)
@@ -1011,7 +1011,7 @@ func (r *GeometryResolver) fitBezierToBSpline(ctrl [][2]float64, knotLast float6
 	// At each t: 3(1-t)²t·P1 + 3(1-t)t²·P2 = P(t) - (1-t)³P0 - t³P3
 
 	b10 := 3 * (1 - t1) * (1 - t1) * t1 // 3(1-t1)²t1
-	b11 := 3 * (1 - t1) * t1 * t1        // 3(1-t1)t1²
+	b11 := 3 * (1 - t1) * t1 * t1       // 3(1-t1)t1²
 	b20 := 3 * (1 - t2) * (1 - t2) * t2
 	b21 := 3 * (1 - t2) * t2 * t2
 	b30 := 3 * (1 - t3) * (1 - t3) * t3

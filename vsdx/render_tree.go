@@ -82,7 +82,7 @@ type MarkerDef struct {
 	Size      int
 	Color     string
 	IsEnd     bool
-	Path      string  // SVG path for the marker
+	Path      string // SVG path for the marker
 	Width     float64
 	Height    float64
 	RefX      float64
@@ -93,21 +93,21 @@ type MarkerDef struct {
 // ResolvedText contains pre-computed text rendering data.
 type ResolvedText struct {
 	Content        string
-	X, Y           float64 // position in world coordinates
-	FontSize       float64 // in SVG units
-	FontFamily     string  // font family (e.g., "Calibri, sans-serif")
-	FontWeight     string  // "normal" or "bold"
-	FontStyle      string  // "normal" or "italic"
-	TextDecoration string  // "none", "underline", "line-through", "overline", or combined
-	Fill           string  // text color
-	TextAnchor     string  // "start", "middle", or "end"
-	Baseline       string  // "hanging", "middle", or "alphabetic"
-	Transform      string  // rotation transform
-	WritingMode    string  // SVG writing-mode value when text flows vertically (e.g. "vertical-rl"). Empty for horizontal.
+	X, Y           float64  // position in world coordinates
+	FontSize       float64  // in SVG units
+	FontFamily     string   // font family (e.g., "Calibri, sans-serif")
+	FontWeight     string   // "normal" or "bold"
+	FontStyle      string   // "normal" or "italic"
+	TextDecoration string   // "none", "underline", "line-through", "overline", or combined
+	Fill           string   // text color
+	TextAnchor     string   // "start", "middle", or "end"
+	Baseline       string   // "hanging", "middle", or "alphabetic"
+	Transform      string   // rotation transform
+	WritingMode    string   // SVG writing-mode value when text flows vertically (e.g. "vertical-rl"). Empty for horizontal.
 	Lines          []string // for multi-line text
 	LineHeight     float64
-	SmallCaps      bool    // render as small capitals
-	TextPos        int     // 0=normal, 1=superscript, 2=subscript
+	SmallCaps      bool // render as small capitals
+	TextPos        int  // 0=normal, 1=superscript, 2=subscript
 	// BackgroundFill is the fill colour for an opaque rectangle drawn behind
 	// the text (matches Visio's textBkgnd rect for connector labels so the
 	// line doesn't cut through the text). Empty = no background.

@@ -151,11 +151,11 @@ func (t WorldTransform) String() string {
 
 // ShapeTransform holds the complete transform information for a shape.
 type ShapeTransform struct {
-	Local      WorldTransform // shape's local transform (from its properties)
-	Parent     WorldTransform // accumulated parent transforms
-	World      WorldTransform // final world transform (Parent * Local)
-	LocalBounds  Rect         // bounds in shape's local coordinate system
-	WorldBounds  Rect         // bounds in world coordinates
+	Local       WorldTransform // shape's local transform (from its properties)
+	Parent      WorldTransform // accumulated parent transforms
+	World       WorldTransform // final world transform (Parent * Local)
+	LocalBounds Rect           // bounds in shape's local coordinate system
+	WorldBounds Rect           // bounds in world coordinates
 }
 
 // ComputeShapeTransform computes the complete transform for a shape.

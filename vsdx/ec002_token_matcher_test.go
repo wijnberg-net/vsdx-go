@@ -39,7 +39,7 @@ func TestEC002_TokenMatcher_NegativeMatches(t *testing.T) {
 		"SubWidget",
 		"Showroom",
 		"SomeWidthRef + 1",
-		"width", // lowercase: not the Visio cell
+		"width",  // lowercase: not the Visio cell
 		"HEIGHT", // uppercase: not the Visio cell
 	}
 	for _, f := range negatives {

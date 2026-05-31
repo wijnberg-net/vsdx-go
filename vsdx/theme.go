@@ -11,23 +11,23 @@ import (
 
 // Theme represents the visual theme applied to a Visio document.
 type Theme struct {
-	Name               string
-	Colors             ThemeColors
-	Fonts              ThemeFonts
-	Effects            ThemeEffects
-	Variants           []ThemeVariant
+	Name                string
+	Colors              ThemeColors
+	Fonts               ThemeFonts
+	Effects             ThemeEffects
+	Variants            []ThemeVariant
 	ConnectorLineStyles []ConnectorLineStyle // Connector arrow/line style presets
-	LineStyles          []LineStyleColor      // Non-connector line styles from fmtScheme/lnStyleLst
-	FontStyles          []FontStyleColor      // Font styles from fontStylesGroup (indexed by QuickStyleFontMatrix)
+	LineStyles          []LineStyleColor     // Non-connector line styles from fmtScheme/lnStyleLst
+	FontStyles          []FontStyleColor     // Font styles from fontStylesGroup (indexed by QuickStyleFontMatrix)
 }
 
 // LineStyleColor represents a resolved line style color from the theme.
 // These are indexed by QuickStyleLineMatrix for non-connector shapes.
 type LineStyleColor struct {
-	Color       string  // Resolved RGB hex color (e.g., "#C7C8C8"), empty if phClr
-	IsPhClr     bool    // True if this uses placeholder color (shape's QuickStyleLineColor)
-	PhClrTint   float64 // Tint to apply to phClr (0-1, 0=no tint)
-	PhClrShade  float64 // Shade to apply to phClr (0-1, 0=no shade)
+	Color      string  // Resolved RGB hex color (e.g., "#C7C8C8"), empty if phClr
+	IsPhClr    bool    // True if this uses placeholder color (shape's QuickStyleLineColor)
+	PhClrTint  float64 // Tint to apply to phClr (0-1, 0=no tint)
+	PhClrShade float64 // Shade to apply to phClr (0-1, 0=no shade)
 }
 
 // FontStyleColor represents a font style from the theme.
@@ -49,17 +49,17 @@ type ConnectorLineStyle struct {
 
 // ThemeColors holds the color palette from the theme.
 type ThemeColors struct {
-	Dark1   string // dk1 - typically black
-	Light1  string // lt1 - typically white
-	Dark2   string // dk2 - secondary dark
-	Light2  string // lt2 - secondary light
-	Accent1 string // accent1
-	Accent2 string // accent2
-	Accent3 string // accent3
-	Accent4 string // accent4
-	Accent5 string // accent5
-	Accent6 string // accent6
-	Hlink   string // hyperlink color
+	Dark1    string // dk1 - typically black
+	Light1   string // lt1 - typically white
+	Dark2    string // dk2 - secondary dark
+	Light2   string // lt2 - secondary light
+	Accent1  string // accent1
+	Accent2  string // accent2
+	Accent3  string // accent3
+	Accent4  string // accent4
+	Accent5  string // accent5
+	Accent6  string // accent6
+	Hlink    string // hyperlink color
 	FolHlink string // followed hyperlink color
 }
 
@@ -449,9 +449,9 @@ func parseThemeVariants(vis *VisioFile, themeDoc *etree.Document) []ThemeVariant
 
 		// Also store named mappings for convenience.
 		// varColor1 is typically the primary fill, varColor2-7 are accent colors.
-		variant.FillColor = variant.VarColors[0]  // varColor1
-		variant.FillColor2 = variant.VarColors[1] // varColor2
-		variant.LineColor = variant.VarColors[2]  // varColor3
+		variant.FillColor = variant.VarColors[0]   // varColor1
+		variant.FillColor2 = variant.VarColors[1]  // varColor2
+		variant.LineColor = variant.VarColors[2]   // varColor3
 		variant.AccentColor = variant.VarColors[4] // varColor5
 
 		// Check monotone attribute.

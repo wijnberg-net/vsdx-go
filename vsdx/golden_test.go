@@ -34,13 +34,13 @@ type GoldenManifest struct {
 
 // GoldenTestResult represents the result of comparing a render to golden.
 type GoldenTestResult struct {
-	Fixture     *GoldenFixture
-	Passed      bool
-	ActualSVG   string
-	GoldenSVG   string
-	Diffs       []string
-	GoldenHash  string
-	ActualHash  string
+	Fixture    *GoldenFixture
+	Passed     bool
+	ActualSVG  string
+	GoldenSVG  string
+	Diffs      []string
+	GoldenHash string
+	ActualHash string
 }
 
 const goldenDir = "../testdata/golden"

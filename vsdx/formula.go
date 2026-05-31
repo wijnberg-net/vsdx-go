@@ -1838,7 +1838,6 @@ func (e *FormulaEvaluator) evalFunc(name, argsStr string) (float64, bool) {
 		}
 		return 0, true
 
-
 	// VALUE
 	case "VALUE":
 		if len(args) >= 1 {

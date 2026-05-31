@@ -398,10 +398,11 @@ func (s *Shape) BoundingBox() Rect {
 
 // --- Position and size setters ---
 
-func (s *Shape) SetX(v float64)      { s.SetCellValue(CellPinX, fmtFloat(v)) }
-func (s *Shape) SetY(v float64)      { s.SetCellValue(CellPinY, fmtFloat(v)) }
-func (s *Shape) SetLocX(v float64)   { s.SetCellValue(CellLocPinX, fmtFloat(v)) }
-func (s *Shape) SetLocY(v float64)   { s.SetCellValue(CellLocPinY, fmtFloat(v)) }
+func (s *Shape) SetX(v float64)    { s.SetCellValue(CellPinX, fmtFloat(v)) }
+func (s *Shape) SetY(v float64)    { s.SetCellValue(CellPinY, fmtFloat(v)) }
+func (s *Shape) SetLocX(v float64) { s.SetCellValue(CellLocPinX, fmtFloat(v)) }
+func (s *Shape) SetLocY(v float64) { s.SetCellValue(CellLocPinY, fmtFloat(v)) }
+
 // SetWidth changes the shape's Width cell AND scales every absolute X
 // coordinate in its local geometry by the same factor — plus the LocPinX
 // cell so the shape's anchor moves with the resize. Without the scaling,
@@ -554,7 +555,7 @@ func scaleGeometryAxis(g *Geometry, axis string, scale float64) {
 		}
 	}
 }
-func (s *Shape) SetAngle(v float64)  { s.SetCellValue(CellAngle, fmtFloat(v)) }
+func (s *Shape) SetAngle(v float64) { s.SetCellValue(CellAngle, fmtFloat(v)) }
 
 // FlipX returns true if the shape is mirrored along its vertical axis.
 // Per MS-VSDX §2.2.3.2.1 step 3 in the canonical 7-step transform: when
@@ -675,6 +676,7 @@ func (s *Shape) SetLineWeight(v float64) {
 		c.SetUnit("PT")
 	}
 }
+
 // SetLineColor sets the line color to an explicit literal and clears any
 // theme-binding formula on that cell. Without the F clear, an existing
 // `F="THEMEGUARD(RGB(...))"` would survive on the local cell and Visio's
@@ -1168,13 +1170,13 @@ func (s *Shape) SetLayerMember(layers string) {
 
 // ScratchCell represents a scratch cell row in the Scratch section.
 type ScratchCell struct {
-	Row   int
-	X     string
-	Y     string
-	A     string
-	B     string
-	C     string
-	D     string
+	Row int
+	X   string
+	Y   string
+	A   string
+	B   string
+	C   string
+	D   string
 }
 
 // ScratchCells returns all scratch cells from this shape.
@@ -1254,17 +1256,17 @@ func (s *Shape) AddScratchCell(x, y, a, b, c, d string) int {
 
 // Action represents a row in the Actions section (right-click menu items).
 type Action struct {
-	Name        string
-	Menu        string
-	Action      string
-	Checked     bool
-	Disabled    bool
-	ReadOnly    bool
-	Invisible   bool
-	BeginGroup  bool
-	TagName     string
-	ButtonFace  string
-	SortKey     string
+	Name       string
+	Menu       string
+	Action     string
+	Checked    bool
+	Disabled   bool
+	ReadOnly   bool
+	Invisible  bool
+	BeginGroup bool
+	TagName    string
+	ButtonFace string
+	SortKey    string
 }
 
 // Actions returns all action rows from this shape.
@@ -1331,14 +1333,14 @@ func (s *Shape) AddAction(name, menu, action string) {
 
 // Field represents a text field in the shape.
 type Field struct {
-	Row       int
-	Value     string
-	Format    string
-	Type      int // 0=String, 2=Numeric, 5=DateTime, 7=Duration
+	Row        int
+	Value      string
+	Format     string
+	Type       int // 0=String, 2=Numeric, 5=DateTime, 7=Duration
 	UICategory int
-	UICode    int
-	UIFormat  int
-	Calendar  int
+	UICode     int
+	UIFormat   int
+	Calendar   int
 	ObjectKind int
 }
 
@@ -1409,15 +1411,15 @@ func (s *Shape) AddField(fieldType int, value, format string) int {
 
 // Control represents a control handle on the shape.
 type Control struct {
-	Name      string
-	X         float64
-	Y         float64
-	XDyn      string
-	YDyn      string
-	XCon      int
-	YCon      int
-	CanGlue   bool
-	Tip       string
+	Name    string
+	X       float64
+	Y       float64
+	XDyn    string
+	YDyn    string
+	XCon    int
+	YCon    int
+	CanGlue bool
+	Tip     string
 }
 
 // Controls returns all control handles from this shape.
@@ -2789,25 +2791,25 @@ func (s *Shape) SetSketchEffect(effect *SketchEffect) {
 
 // Rotation3DEffect holds 3D rotation effect properties for a shape.
 type Rotation3DEffect struct {
-	XAngle           float64 // Rotation around X axis in degrees
-	YAngle           float64 // Rotation around Y axis in degrees
-	ZAngle           float64 // Rotation around Z axis in degrees
-	RotationType     int     // Rotation type (0=parallel, 1=perspective)
-	Perspective      float64 // Perspective field of view
+	XAngle             float64 // Rotation around X axis in degrees
+	YAngle             float64 // Rotation around Y axis in degrees
+	ZAngle             float64 // Rotation around Z axis in degrees
+	RotationType       int     // Rotation type (0=parallel, 1=perspective)
+	Perspective        float64 // Perspective field of view
 	DistanceFromGround float64 // Distance from ground plane
-	KeepTextFlat     bool    // Whether to keep text flat (not rotated)
+	KeepTextFlat       bool    // Whether to keep text flat (not rotated)
 }
 
 // Rotation3DEffect returns the 3D rotation effect properties for this shape.
 func (s *Shape) Rotation3DEffect() *Rotation3DEffect {
 	return &Rotation3DEffect{
-		XAngle:           toFloat(s.CellValue(CellRotationXAngle)),
-		YAngle:           toFloat(s.CellValue(CellRotationYAngle)),
-		ZAngle:           toFloat(s.CellValue(CellRotationZAngle)),
-		RotationType:     int(toFloat(s.CellValue(CellRotationType))),
-		Perspective:      toFloat(s.CellValue(CellPerspective)),
+		XAngle:             toFloat(s.CellValue(CellRotationXAngle)),
+		YAngle:             toFloat(s.CellValue(CellRotationYAngle)),
+		ZAngle:             toFloat(s.CellValue(CellRotationZAngle)),
+		RotationType:       int(toFloat(s.CellValue(CellRotationType))),
+		Perspective:        toFloat(s.CellValue(CellPerspective)),
 		DistanceFromGround: toFloat(s.CellValue(CellDistanceFromGround)),
-		KeepTextFlat:     toFloat(s.CellValue(CellKeepTextFlat)) != 0,
+		KeepTextFlat:       toFloat(s.CellValue(CellKeepTextFlat)) != 0,
 	}
 }
 

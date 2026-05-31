@@ -9,16 +9,16 @@ import (
 
 // Comment represents a comment/annotation in a Visio document.
 type Comment struct {
-	ID        int       // Unique comment ID
-	AuthorID  int       // ID of the comment author
-	PageID    int       // Page the comment is on
-	ShapeID   int       // Shape the comment is attached to (0 = page-level)
-	Date      time.Time // When the comment was created
-	EditDate  time.Time // When the comment was last edited
-	Done      bool      // Whether the comment is marked as resolved
-	Text      string    // Comment text content
-	xml       *etree.Element
-	vis       *VisioFile
+	ID       int       // Unique comment ID
+	AuthorID int       // ID of the comment author
+	PageID   int       // Page the comment is on
+	ShapeID  int       // Shape the comment is attached to (0 = page-level)
+	Date     time.Time // When the comment was created
+	EditDate time.Time // When the comment was last edited
+	Done     bool      // Whether the comment is marked as resolved
+	Text     string    // Comment text content
+	xml      *etree.Element
+	vis      *VisioFile
 }
 
 // Author represents a comment author.

@@ -8,9 +8,9 @@ import (
 // Router handles automatic connector routing on a page.
 type Router struct {
 	page      *Page
-	obstacles []Rect   // Bounding boxes of shapes to avoid
-	gridSize  float64  // Grid cell size in inches
-	padding   float64  // Minimum distance from obstacles
+	obstacles []Rect  // Bounding boxes of shapes to avoid
+	gridSize  float64 // Grid cell size in inches
+	padding   float64 // Minimum distance from obstacles
 }
 
 // RouteOptions configures the routing algorithm.

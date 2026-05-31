@@ -8,13 +8,13 @@ import (
 
 // DataConnection represents an external data connection.
 type DataConnection struct {
-	ID             int
-	FileName       string
-	ConnectionName string
+	ID                      int
+	FileName                string
+	ConnectionName          string
 	AlwaysUseConnectionFile bool
-	Command        string
-	Timeout        int
-	xml            *etree.Element
+	Command                 string
+	Timeout                 int
+	xml                     *etree.Element
 }
 
 // DataRecordSet represents a set of data records linked to shapes.

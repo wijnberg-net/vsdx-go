@@ -669,9 +669,9 @@ func (v *VisioFile) validatePageReferences(result *ValidationResult) {
 
 // ParseOptions configures error handling during file parsing.
 type ParseOptions struct {
-	StrictMode   bool                  // If true, fail on any error
-	ErrorHandler func(error)           // Callback for non-fatal errors
-	MaxErrors    int                   // Stop after this many errors (0 = unlimited)
+	StrictMode   bool        // If true, fail on any error
+	ErrorHandler func(error) // Callback for non-fatal errors
+	MaxErrors    int         // Stop after this many errors (0 = unlimited)
 }
 
 // OpenWithOptions opens a Visio file with custom parse options.

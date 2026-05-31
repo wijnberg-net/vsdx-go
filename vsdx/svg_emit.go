@@ -12,13 +12,13 @@ import (
 // NO geometry mutation, and NO semantic analysis.
 // All decisions must be made before calling Emit().
 type SVGEmitter struct {
-	precision      int
-	node           *RenderNode
-	outW           float64
-	outH           float64
-	scale          float64 // scale factor (pixels per inch)
-	negativeWidth  bool    // original shape had negative width (connector going left)
-	negativeHeight bool    // original shape had negative height (connector going down)
+	precision        int
+	node             *RenderNode
+	outW             float64
+	outH             float64
+	scale            float64            // scale factor (pixels per inch)
+	negativeWidth    bool               // original shape had negative width (connector going left)
+	negativeHeight   bool               // original shape had negative height (connector going down)
 	shadowFilterID   string             // unique filter ID for shadows in this shape
 	softEdgesFilters map[string]float64 // collected soft-edge filter IDs → blur radius (pt)
 }
@@ -403,7 +403,7 @@ func (e *SVGEmitter) emitMarker(m *MarkerDef) string {
 	orient := "auto"
 	pathStr := m.Path
 	refX := m.RefX
-	isBackAnchored := m.RefX >= 9.5  // RefX=10 indicates back-anchored
+	isBackAnchored := m.RefX >= 9.5            // RefX=10 indicates back-anchored
 	isCentered := m.RefX > 0.5 && m.RefX < 9.5 // RefX≈5 indicates centered (circle/square)
 
 	if isCentered {

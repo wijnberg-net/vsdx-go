@@ -151,13 +151,13 @@ func lineGradientToSVGDef(id string, grad *LineGradient) string {
 
 // Reviewer represents a comment reviewer/author with more details.
 type Reviewer struct {
-	ID            int
-	Name          string
-	Initials      string
-	Color         string
-	ReviewerID    int
-	CurrentIndex  int
-	xml           *etree.Element
+	ID           int
+	Name         string
+	Initials     string
+	Color        string
+	ReviewerID   int
+	CurrentIndex int
+	xml          *etree.Element
 }
 
 // Reviewers returns all reviewers in the document.

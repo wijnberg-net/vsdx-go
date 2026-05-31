@@ -89,42 +89,42 @@ func (a ArrowDef) LengthMult() float64 {
 // arrow keeps its proper aspect ratio. Bezier paths may extend slightly
 // outside viewBox 0..10; the emitter sets overflow="visible".
 var visioArrowTypes = map[int]ArrowDef{
-	0: {}, // None
-	1:  {Path: "M 0 0 L 10 5 L 0 10",                                                                       W: 1.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 0},     // lend1  open chevron
-	2:  {Path: "M 0 10 L 10 5 L 0 0 L 0 10 z",                                                              W: 1.000, H: 2.000, RefX: 0, RefY: 5, Filled: true,  Setback: 1.000}, // lend2  filled triangle (small)
-	3:  {Path: "M 0 10 L 10 5 L 0 0",                                                                       W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 0},     // lend3  open chevron (med)
-	4:  {Path: "M 0 10 L 10 5 L 0 0 L 0 10 z",                                                              W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: true,  Setback: 2.000}, // lend4  filled triangle (med)
-	5:  {Path: "M 0 9.998 L 10 5 L 0.094 0.035 C 1.641 3.178 1.635 6.862 0.077 10 z",                       W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: true,  Setback: 1.700}, // lend5  filled swept-back
-	6:  {Path: "M 1.413 9.968 L 10 5 L 1.36 0 C 0 3.147 0 6.852 1.36 10 z",                                 W: 2.329, H: 2.013, RefX: 0, RefY: 5, Filled: true,  Setback: 2.200}, // lend6  filled swept-back (variant)
-	7:  {Path: "M 0 0 C 2.198 3.016 5.744 4.864 9.574 4.993 L 9.574 5.007 C 5.744 5.136 2.198 6.984 0 10", W: 1.843, H: 1.919, RefX: 0, RefY: 5, Filled: false, Setback: 0},     // lend7  S-curve fishtail (wings at refX, tip forward)
+	0: {},                                                                                                                                                                  // None
+	1: {Path: "M 0 0 L 10 5 L 0 10", W: 1.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 0},                                                                      // lend1  open chevron
+	2: {Path: "M 0 10 L 10 5 L 0 0 L 0 10 z", W: 1.000, H: 2.000, RefX: 0, RefY: 5, Filled: true, Setback: 1.000},                                                          // lend2  filled triangle (small)
+	3: {Path: "M 0 10 L 10 5 L 0 0", W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 0},                                                                      // lend3  open chevron (med)
+	4: {Path: "M 0 10 L 10 5 L 0 0 L 0 10 z", W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: true, Setback: 2.000},                                                          // lend4  filled triangle (med)
+	5: {Path: "M 0 9.998 L 10 5 L 0.094 0.035 C 1.641 3.178 1.635 6.862 0.077 10 z", W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: true, Setback: 1.700},                   // lend5  filled swept-back
+	6: {Path: "M 1.413 9.968 L 10 5 L 1.36 0 C 0 3.147 0 6.852 1.36 10 z", W: 2.329, H: 2.013, RefX: 0, RefY: 5, Filled: true, Setback: 2.200},                             // lend6  filled swept-back (variant)
+	7: {Path: "M 0 0 C 2.198 3.016 5.744 4.864 9.574 4.993 L 9.574 5.007 C 5.744 5.136 2.198 6.984 0 10", W: 1.843, H: 1.919, RefX: 0, RefY: 5, Filled: false, Setback: 0}, // lend7  S-curve fishtail (wings at refX, tip forward)
 	// Type 8 has no dedicated lend symbol — Visio maps it to lend5 (filled swept-back)
-	8:  {Path: "M 0 9.998 L 10 5 L 0.094 0.035 C 1.641 3.178 1.635 6.862 0.077 10 z",                       W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: true,  Setback: 1.700}, // type 8 = lend5 alias
-	9:  {Path: "M 10 0 L 0 10",                                                                             W: 2.000, H: 2.000, RefX: 5, RefY: 5, Filled: false, Setback: 0},     // lend9  diagonal slash
-	10: {Path: "M 5 10 C 2.239 10 0 7.761 0 5 0 2.239 2.239 0 5 0 7.761 0 10 2.239 10 5 10 7.761 7.761 10 5 10 Z", W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: true,  Setback: 0.750}, // lend10 filled circle
-	11: {Path: "M 10 0 L 10 10 L 0 10 L 0 0 L 10 0 z",                                                      W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: true,  Setback: 0.750}, // lend11 filled square
-	12: {Path: "M 0 10 L 10 5 L 0 0",                                                                       W: 3.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 0},     // lend12 open chevron (long)
-	13: {Path: "M 0 10 L 10 5 L 0 0 L 0 10 z",                                                              W: 3.000, H: 2.000, RefX: 0, RefY: 5, Filled: true,  Setback: 3.000}, // lend13 filled triangle (long)
-	14: {Path: "M 0 0 L 10 5 L 0 10 L 0 0",                                                                 W: 3.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 3.000}, // lend14 outlined triangle (long)
-	15: {Path: "M 0 0 L 10 5 L 0 10 L 0 0",                                                                 W: 1.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 1.000}, // lend15 outlined triangle (small)
-	16: {Path: "M 10 5 L 0 0 L 0 10 L 10 5",                                                                W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 2.000}, // lend16 outlined triangle (med, reversed winding)
-	17: {Path: "M 0 9.963 L 10 5 L 0.094 0.07 C 1.647 3.203 1.635 6.877 0.059 10",                          W: 2.000, H: 2.014, RefX: 0, RefY: 5, Filled: false, Setback: 1.700}, // lend17 open swept-back
-	18: {Path: "M 1.413 9.968 L 10 5 L 1.36 0 C 0 3.147 0 6.852 1.36 10",                                   W: 2.329, H: 2.013, RefX: 0, RefY: 5, Filled: false, Setback: 2.200}, // lend18 open swept-back (variant)
+	8:  {Path: "M 0 9.998 L 10 5 L 0.094 0.035 C 1.641 3.178 1.635 6.862 0.077 10 z", W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: true, Setback: 1.700},                                                                                // type 8 = lend5 alias
+	9:  {Path: "M 10 0 L 0 10", W: 2.000, H: 2.000, RefX: 5, RefY: 5, Filled: false, Setback: 0},                                                                                                                                         // lend9  diagonal slash
+	10: {Path: "M 5 10 C 2.239 10 0 7.761 0 5 0 2.239 2.239 0 5 0 7.761 0 10 2.239 10 5 10 7.761 7.761 10 5 10 Z", W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: true, Setback: 0.750},                                                   // lend10 filled circle
+	11: {Path: "M 10 0 L 10 10 L 0 10 L 0 0 L 10 0 z", W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: true, Setback: 0.750},                                                                                                               // lend11 filled square
+	12: {Path: "M 0 10 L 10 5 L 0 0", W: 3.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 0},                                                                                                                                   // lend12 open chevron (long)
+	13: {Path: "M 0 10 L 10 5 L 0 0 L 0 10 z", W: 3.000, H: 2.000, RefX: 0, RefY: 5, Filled: true, Setback: 3.000},                                                                                                                       // lend13 filled triangle (long)
+	14: {Path: "M 0 0 L 10 5 L 0 10 L 0 0", W: 3.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 3.000},                                                                                                                         // lend14 outlined triangle (long)
+	15: {Path: "M 0 0 L 10 5 L 0 10 L 0 0", W: 1.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 1.000},                                                                                                                         // lend15 outlined triangle (small)
+	16: {Path: "M 10 5 L 0 0 L 0 10 L 10 5", W: 2.000, H: 2.000, RefX: 0, RefY: 5, Filled: false, Setback: 2.000},                                                                                                                        // lend16 outlined triangle (med, reversed winding)
+	17: {Path: "M 0 9.963 L 10 5 L 0.094 0.07 C 1.647 3.203 1.635 6.877 0.059 10", W: 2.000, H: 2.014, RefX: 0, RefY: 5, Filled: false, Setback: 1.700},                                                                                  // lend17 open swept-back
+	18: {Path: "M 1.413 9.968 L 10 5 L 1.36 0 C 0 3.147 0 6.852 1.36 10", W: 2.329, H: 2.013, RefX: 0, RefY: 5, Filled: false, Setback: 2.200},                                                                                           // lend18 open swept-back (variant)
 	19: {Path: "M 0 10 C 2.024 6.96 2.061 3.222 0.099 0.152 L 0.117 0.15 C 2.165 3.106 5.824 4.938 9.799 4.998 L 9.799 5.002 C 5.824 5.062 2.165 6.894 0.117 9.85", W: 1.912, H: 2.216, RefX: 0, RefY: 5, Filled: false, Setback: 1.600}, // lend19 open double swept-back
-	20: {Path: "M 5 10 C 2.239 10 0 7.761 0 5 0 2.239 2.239 0 5 0 7.761 0 10 2.239 10 5 10 7.761 7.761 10 5 10 Z", W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: false, Setback: 0.750}, // lend20 open circle
-	21: {Path: "M 10 0 L 10 10 L 0 10 L 0 0 L 10 0",                                                        W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: false, Setback: 0.750}, // lend21 open square
-	22: {Path: "M 0 5 L 5 0 L 10 5 L 5 10 L 0 5",                                                           W: 4.500, H: 2.250, RefX: 0, RefY: 5, Filled: false, Setback: 4.500}, // lend22 long diamond (open)
+	20: {Path: "M 5 10 C 2.239 10 0 7.761 0 5 0 2.239 2.239 0 5 0 7.761 0 10 2.239 10 5 10 7.761 7.761 10 5 10 Z", W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: false, Setback: 0.750},                                                  // lend20 open circle
+	21: {Path: "M 10 0 L 10 10 L 0 10 L 0 0 L 10 0", W: 1.500, H: 1.500, RefX: 5, RefY: 5, Filled: false, Setback: 0.750},                                                                                                                // lend21 open square
+	22: {Path: "M 0 5 L 5 0 L 10 5 L 5 10 L 0 5", W: 4.500, H: 2.250, RefX: 0, RefY: 5, Filled: false, Setback: 4.500},                                                                                                                   // lend22 long diamond (open)
 	// Bar/Y-arrow markers (back-anchored): visual elements sit BEHIND the line
 	// attachment in Visio (overlapping last few sw of line). RefX=10 puts the
 	// line attachment at viewBox right edge; path elements at lower viewBox X
 	// then sit behind the attachment in line direction.
-	23: {Path: "M 10 10 L 6 0",                                                                             W: 2.500, H: 2.000, RefX: 10, RefY: 5, Filled: false, Setback: 0},     // lend23 offset diagonal
-	24: {Path: "M 10 0 L 10 10",                                                                            W: 1.500, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},     // lend24 single bar
-	25: {Path: "M 6.667 0 L 6.667 10 M 10 0 L 10 10",                                                       W: 2.250, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},     // lend25 double bar
-	26: {Path: "M 5 0 L 5 10 M 7.5 0 L 7.5 10 M 10 0 L 10 10",                                              W: 3.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},     // lend26 triple bar
-	27: {Path: "M 0 0 L 10 5 L 0 10",                                                                       W: 1.500, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},     // lend27 small open chevron (back-anchored)
-	28: {Path: "M 0 0 L 7.5 5 L 0 10 M 10 0 L 10 10",                                                       W: 2.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},     // lend28 chevron + bar
+	23: {Path: "M 10 10 L 6 0", W: 2.500, H: 2.000, RefX: 10, RefY: 5, Filled: false, Setback: 0},                                                                                                                             // lend23 offset diagonal
+	24: {Path: "M 10 0 L 10 10", W: 1.500, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},                                                                                                                            // lend24 single bar
+	25: {Path: "M 6.667 0 L 6.667 10 M 10 0 L 10 10", W: 2.250, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},                                                                                                       // lend25 double bar
+	26: {Path: "M 5 0 L 5 10 M 7.5 0 L 7.5 10 M 10 0 L 10 10", W: 3.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},                                                                                              // lend26 triple bar
+	27: {Path: "M 0 0 L 10 5 L 0 10", W: 1.500, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},                                                                                                                       // lend27 small open chevron (back-anchored)
+	28: {Path: "M 0 0 L 7.5 5 L 0 10 M 10 0 L 10 10", W: 2.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 0},                                                                                                       // lend28 chevron + bar
 	29: {Path: "M 7.5 10 C 6.119 10 5 7.761 5 5 5 2.239 6.119 0 7.5 0 8.881 0 10 2.239 10 5 10 7.761 8.881 10 7.5 10 Z M 0 0 L 5 5 L 0 10 M 5 5 L 0 5", W: 3.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 3.000}, // lend29 chevron + tail + circle
-	30: {Path: "M 7.5 10 C 6.119 10 5 7.761 5 5 5 2.239 6.119 0 7.5 0 8.881 0 10 2.239 10 5 10 7.761 8.881 10 7.5 10 Z M 2.5 0 L 2.5 10 M 5 5 L 0 5",   W: 3.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 3.000}, // lend30 bar + tail + circle
+	30: {Path: "M 7.5 10 C 6.119 10 5 7.761 5 5 5 2.239 6.119 0 7.5 0 8.881 0 10 2.239 10 5 10 7.761 8.881 10 7.5 10 Z M 2.5 0 L 2.5 10 M 5 5 L 0 5", W: 3.000, H: 1.500, RefX: 10, RefY: 5, Filled: false, Setback: 3.000},   // lend30 bar + tail + circle
 	// Types 31-45: variants documented in MS-VSDX §2.2.7. Not present in
 	// vsdx-test or other current fixtures; reasonable approximations kept here
 	// so existing renders that reference these IDs still emit a marker.
@@ -144,7 +144,7 @@ var visioArrowTypes = map[int]ArrowDef{
 	// width so the marker bases sit ON the original BeginX / EndX
 	// positions and the total visual width equals Visio's (which uses
 	// the same setback convention).
-	39: {Path: "M0 0 L6 5 L0 10 z M4 0 L10 5 L4 10 z", W: 4.0, H: 2.0, RefX: 0, RefY: 5, Filled: true,  Setback: 4.0},
+	39: {Path: "M0 0 L6 5 L0 10 z M4 0 L10 5 L4 10 z", W: 4.0, H: 2.0, RefX: 0, RefY: 5, Filled: true, Setback: 4.0},
 	40: {Path: "M0 0 L6 5 L0 10 M4 0 L10 5 L4 10", W: 4.0, H: 2.0, RefX: 0, RefY: 5, Filled: false, Setback: 4.0},
 	41: {Path: "M0 2 L10 5 L0 8", W: 2.0, H: 2.0, RefX: 0, RefY: 5, Filled: false},
 	42: {Path: "M0 5 A5 5 0 1 1 10 5 A5 5 0 1 1 0 5 z", W: 2.4, H: 2.0, RefX: 0, RefY: 5, Filled: true},
@@ -162,13 +162,15 @@ var visioArrowTypes = map[int]ArrowDef{
 // Calibrated against Visio's marker <use scale=...> ratios decoded from the
 // comprehensive corpus (size 2 = medium = 1.0 baseline). Sizes 0-4 are a
 // near-linear ramp; size 5 jumps sharply (Visio's "huge" preset):
-//   0: 1.909 / 2.591 ≈ 0.737
-//   1: 2.136 / 2.591 ≈ 0.824
-//   2: 2.591 / 2.591 = 1.000
-//   3: 3.045 / 2.591 ≈ 1.175
-//   4: 3.500 / 2.591 ≈ 1.351
-//   5: 6.682 / 2.591 ≈ 2.579   ← Visio's big jump for "extra extra large"
-//   6: not in corpus; extrapolated from the size 5 step.
+//
+//	0: 1.909 / 2.591 ≈ 0.737
+//	1: 2.136 / 2.591 ≈ 0.824
+//	2: 2.591 / 2.591 = 1.000
+//	3: 3.045 / 2.591 ≈ 1.175
+//	4: 3.500 / 2.591 ≈ 1.351
+//	5: 6.682 / 2.591 ≈ 2.579   ← Visio's big jump for "extra extra large"
+//	6: not in corpus; extrapolated from the size 5 step.
+//
 // Earlier table (0.74, 0.87, 1.0, 1.13, 1.26, 1.39, 1.52) was a linear
 // extension that rendered sizes 5/6 too small by ~50%.
 var arrowSizeMultipliers = []float64{0.74, 0.82, 1.0, 1.18, 1.35, 2.58, 4.0}
@@ -205,7 +207,6 @@ func ShapeToSVG(shape *Shape, opts ...SVGOption) (*SVGResult, error) {
 
 	return EmitRenderTreeWithResult(shape, o.Width, o.Height, o.Precision, o.BrandColor)
 }
-
 
 // generateMarkerSVG generates an SVG <marker> element for an arrow.
 func escapeXML(s string) string {
@@ -384,8 +385,8 @@ func linePatternToSVG(pattern int, weight float64) string {
 		weight = 1
 	}
 	// Visio's standard segment sizes (extracted from real Visio SVG exports):
-	dash := weight * 7    // long visible dash
-	gap := weight * 5     // standard gap between segments
+	dash := weight * 7      // long visible dash
+	gap := weight * 5       // standard gap between segments
 	sparseGap := weight * 3 // tighter gap for dot-only patterns
 	switch pattern {
 	case 0, 1: // None, Solid

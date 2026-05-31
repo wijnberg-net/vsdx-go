@@ -121,7 +121,7 @@ func TestComputeArrowSetback(t *testing.T) {
 
 func TestEffectiveStyle_FillColor(t *testing.T) {
 	es := &EffectiveStyle{
-		FillPattern:      1,       // Solid
+		FillPattern:      1, // Solid
 		FillForegnd:      "#FF0000",
 		FillForegndTrans: 0,
 		NoFill:           false,

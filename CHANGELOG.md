@@ -3,6 +3,10 @@
 All notable changes to this project are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.2]
+
+- Apply `gofmt -s` to the entire codebase (formatting only; no behavior change).
+
 ## [1.0.1]
 
 - Add runnable examples (`examples/`) and package-level example documentation.
