@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "generated": "2024-01-01",
+  "fixtures": [
+    {
+      "name": "simple_rect",
+      "vsdx_path": "../tests/test_master.vsdx",
+      "shape_id": "5",
+      "width": 100,
+      "height": 100,
+      "precision": 2,
+      "golden_svg": "simple_rect.svg",
+      "categories": [
+        "geometry",
+        "text"
+      ],
+      "description": "Simple rectangle with text"
+    },
+    {
+      "name": "filled_rect",
+      "vsdx_path": "../tests/test_master.vsdx",
+      "shape_id": "6",
+      "width": 100,
+      "height": 100,
+      "precision": 2,
+      "golden_svg": "filled_rect.svg",
+      "categories": [
+        "geometry",
+        "fill",
+        "text"
+      ],
+      "description": "Filled rectangle with text"
+    },
+    {
+      "name": "house_group",
+      "vsdx_path": "../tests/test3_house.vsdx",
+      "shape_id": "7",
+      "width": 100,
+      "height": 100,
+      "precision": 2,
+      "golden_svg": "house_group.svg",
+      "categories": [
+        "geometry",
+        "group",
+        "transform"
+      ],
+      "description": "House shape with nested geometries"
+    },
+    {
+      "name": "connector_arrow",
+      "vsdx_path": "../tests/test5_master.vsdx",
+      "shape_id": "5",
+      "width": 100,
+      "height": 100,
+      "precision": 2,
+      "golden_svg": "connector_arrow.svg",
+      "categories": [
+        "geometry",
+        "markers"
+      ],
+      "description": "Connector with arrow marker"
+    }
+  ]
+}

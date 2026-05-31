@@ -1,0 +1,12 @@
+# Test / build artifacts
+*.test
+*.out
+coverage.txt
+
+# Local tooling — not for distribution
+.claude/
+CLAUDE.md
+
+# Editor / OS
+.DS_Store
+*.swp
