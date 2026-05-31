@@ -233,7 +233,7 @@ func (b *RenderTreeBuilder) buildNodeWithOffset(shape *Shape, zOrder int, parent
 	// own visible label text — matches Visio's behaviour of emitting the
 	// group label in a separate v:groupContext="groupContent" block).
 	// Inherited (master-fallback) text on geometry-less groups is still
-	// suppressed to avoid duplicates from §9 in DIVERGENCE_STATUS.
+	// suppressed to avoid emitting the same label twice.
 	hasLocalText := shape.XML().FindElement("Text") != nil
 	if node.Visible && shape.Text() != "" && (len(node.Geometry) > 0 || hasLocalText) {
 		negH := shape.Height() < 0

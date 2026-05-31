@@ -13,12 +13,7 @@ The matrices below mark each plane independently. A row tagged
 `Model ✓ / Render ✗` means the feature round-trips through .vsdx
 correctly but the SVG export currently doesn't show it.
 
-**Last reviewed**: 2026-05-29 (writer canonicalization sweep)
-
-**Cross-references**:
-- `DIVERGENCE_STATUS.md` — per-divergence resolution + evidence
-- `RENDER_AUDIT.md` — render pipeline architecture
-- `WRITER_AUDIT.md` — writer canonical-form audit
+**Last reviewed**: 2026-05-31 (re-audit against the public v1.0 source).
 
 ---
 
@@ -45,9 +40,8 @@ correctly but the SVG export currently doesn't show it.
 | Fill transparency (FillForegndTrans) | ✓ | ✓ | ✓ |
 | Linear gradient (FillGradient section) | ✓ | ✓ | ✓ |
 | Radial gradient (FillGradientDir 7-11) | ✓ | ✓ | ✓ |
-| Hatch patterns 2-9 (8×8 bitmap emit) | ✓ | ✓ | ✓ |
-| Dot patterns 25-26 (fine / medium) | ✓ | ✓ | ✓ |
-| Hatch patterns 10-24 | ✓ | ✓ | ⚠️ (rendered as solid) |
+| Hatch / dot patterns 2-24 (SVG `<pattern>` emit) | ✓ | ✓ | ✓ |
+| Patterns 25-26 and higher | ✓ | ✓ | ⚠️ (fall through to no pattern fill) |
 | Image / texture fills | ✓ (cells) | partial | ✗ |
 | Picture fills with crop / tile | ⚠️ (cells only) | ✗ | ✗ |
 | Compound lines (DoubleLine, ParaLine) | ✗ | ✗ | ✗ |
@@ -216,7 +210,7 @@ correctly but the SVG export currently doesn't show it.
 
 ## Known Intentional Divergences from Visio
 
-These are conscious choices documented in `DIVERGENCE_STATUS.md`:
+These are conscious rendering choices:
 
 1. **Arrow setback unit conversion** — RenderTree converts points to SVG
    units (÷72×96); legacy code treated points as SVG units directly.
@@ -231,5 +225,5 @@ These are conscious choices documented in `DIVERGENCE_STATUS.md`:
 
 - Renderer: RenderTree 1.x (render_tree.go)
 - MS-VSDX spec: 2012/main namespace
-- Library version: post writer-canonicalization sweep (commit a5976f9)
-- Last doc review: 2026-05-29
+- Library version: v1.0.x
+- Last doc review: 2026-05-31
