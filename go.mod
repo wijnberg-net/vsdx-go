@@ -1,4 +1,4 @@
-module github.com/michelwijnberg/vsdx-go
+module github.com/wijnberg-net/vsdx-go
 
 go 1.21.0
 

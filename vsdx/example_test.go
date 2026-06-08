@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/michelwijnberg/vsdx-go/vsdx"
+	"github.com/wijnberg-net/vsdx-go/vsdx"
 )
 
 // Open a .vsdx file and print every shape on the first page.

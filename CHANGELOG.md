@@ -3,6 +3,10 @@
 All notable changes to this project are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0]
+
+- Move the module to the `wijnberg-net` organization: the import path is now `github.com/wijnberg-net/vsdx-go`. Update your imports accordingly. Existing `github.com/michelwijnberg/vsdx-go` releases keep resolving via GitHub's redirect.
+
 ## [1.0.4]
 
 - Re-audit and correct the feature-support matrix: fill patterns 2-24 render as SVG patterns (previously mis-documented as solid).

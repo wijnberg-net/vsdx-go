@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/michelwijnberg/vsdx-go/vsdx"
+	"github.com/wijnberg-net/vsdx-go/vsdx"
 )
 
 func main() {

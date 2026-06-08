@@ -13,4 +13,4 @@ go run ./examples/inspect path/to/diagram.vsdx
 ```
 
 For API-level snippets (open, edit + save, render to SVG), see the runnable
-examples on [pkg.go.dev](https://pkg.go.dev/github.com/michelwijnberg/vsdx-go/vsdx#pkg-examples).
+examples on [pkg.go.dev](https://pkg.go.dev/github.com/wijnberg-net/vsdx-go/vsdx#pkg-examples).

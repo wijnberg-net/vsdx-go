@@ -1,8 +1,8 @@
 # vsdx-go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/michelwijnberg/vsdx-go/vsdx.svg)](https://pkg.go.dev/github.com/michelwijnberg/vsdx-go/vsdx)
-[![Go Report Card](https://goreportcard.com/badge/github.com/michelwijnberg/vsdx-go)](https://goreportcard.com/report/github.com/michelwijnberg/vsdx-go)
-[![CI](https://github.com/michelwijnberg/vsdx-go/actions/workflows/ci.yml/badge.svg)](https://github.com/michelwijnberg/vsdx-go/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/wijnberg-net/vsdx-go/vsdx.svg)](https://pkg.go.dev/github.com/wijnberg-net/vsdx-go/vsdx)
+[![Go Report Card](https://goreportcard.com/badge/github.com/wijnberg-net/vsdx-go)](https://goreportcard.com/report/github.com/wijnberg-net/vsdx-go)
+[![CI](https://github.com/wijnberg-net/vsdx-go/actions/workflows/ci.yml/badge.svg)](https://github.com/wijnberg-net/vsdx-go/actions/workflows/ci.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
 A Go library for reading, editing, writing, and rendering Microsoft Visio (`.vsdx`) files — no Visio or Office installation required.
@@ -19,7 +19,7 @@ A Go library for reading, editing, writing, and rendering Microsoft Visio (`.vsd
 ## Installation
 
 ```bash
-go get github.com/michelwijnberg/vsdx-go/vsdx
+go get github.com/wijnberg-net/vsdx-go/vsdx
 ```
 
 Requires Go 1.21 or later. The only dependency is [github.com/beevik/etree](https://github.com/beevik/etree).
@@ -33,7 +33,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/michelwijnberg/vsdx-go/vsdx"
+	"github.com/wijnberg-net/vsdx-go/vsdx"
 )
 
 func main() {
@@ -109,7 +109,7 @@ vis.RenderTemplate(map[string]any{
 ## API reference
 
 The complete, always-current API — every type, method, and runnable example —
-is on **[pkg.go.dev](https://pkg.go.dev/github.com/michelwijnberg/vsdx-go/vsdx)**.
+is on **[pkg.go.dev](https://pkg.go.dev/github.com/wijnberg-net/vsdx-go/vsdx)**.
 
 A few entry points to get oriented:
 
@@ -123,7 +123,7 @@ A few entry points to get oriented:
 - **Templating:** `(*VisioFile).RenderTemplate`
 
 Runnable examples live in [`examples/`](examples) and as
-[Go examples](https://pkg.go.dev/github.com/michelwijnberg/vsdx-go/vsdx#pkg-examples)
+[Go examples](https://pkg.go.dev/github.com/wijnberg-net/vsdx-go/vsdx#pkg-examples)
 on pkg.go.dev.
 
 ## How it works
