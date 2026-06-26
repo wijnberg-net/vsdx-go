@@ -11,6 +11,14 @@ var (
 	ErrInvalidFormat   = errors.New("invalid vsdx format")
 	ErrShapeNotFound   = errors.New("shape not found")
 
+	// ErrNotAGroup is returned when ungroup is attempted on a non-group shape.
+	ErrNotAGroup = errors.New("shape is not a group")
+
+	// ErrUnsupportedUngroup is returned when a group cannot be safely dissolved
+	// because doing so would require an affine decomposition we don't perform
+	// (rotated or flipped groups).
+	ErrUnsupportedUngroup = errors.New("ungroup unsupported for rotated or flipped groups")
+
 	// Formula evaluation errors
 	ErrFormulaUnsupported   = errors.New("formula function not implemented")
 	ErrFormulaInvalidSyntax = errors.New("formula syntax error")

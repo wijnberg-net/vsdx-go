@@ -3,6 +3,11 @@
 All notable changes to this project are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0]
+
+- Add `Page.UngroupShape`: dissolve a group, promoting its direct children back into the parent container (the page, or the enclosing group when nested) with positions converted from group-local to parent coordinates — the inverse of `GroupShapes`. Children are moved, not rebuilt, so all cells, sections, sub-shapes and unknown XML survive verbatim; only `PinX`/`PinY` change. Z-order and inter-child connectors are preserved. Axis-aligned groups only; rotated or flipped groups return `ErrUnsupportedUngroup` without mutating the document.
+- Add sentinel errors `ErrNotAGroup` and `ErrUnsupportedUngroup`.
+
 ## [1.1.0]
 
 - Move the module to the `wijnberg-net` organization: the import path is now `github.com/wijnberg-net/vsdx-go`. Update your imports accordingly. Existing `github.com/michelwijnberg/vsdx-go` releases keep resolving via GitHub's redirect.
