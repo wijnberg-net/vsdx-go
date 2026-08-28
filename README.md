@@ -1,7 +1,6 @@
 # vsdx-go
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/wijnberg-net/vsdx-go/vsdx.svg)](https://pkg.go.dev/github.com/wijnberg-net/vsdx-go/vsdx)
-[![Go Report Card](https://goreportcard.com/badge/github.com/wijnberg-net/vsdx-go)](https://goreportcard.com/report/github.com/wijnberg-net/vsdx-go)
 [![CI](https://github.com/wijnberg-net/vsdx-go/actions/workflows/ci.yml/badge.svg)](https://github.com/wijnberg-net/vsdx-go/actions/workflows/ci.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
